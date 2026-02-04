@@ -25,11 +25,8 @@ jobs:
 
       - name: Start qBittorrent test container
         run: |
-          docker compose -f docker-compose.test.yml up -d
-
-      - name: Wait for qBittorrent to be ready
-        run: |
-          timeout 60 bash -c 'until docker exec qbittorrent-test curl -sf http://localhost:8080/api/v2/app/webapiVersion > /dev/null; do sleep 2; done'
+          docker compose -f docker-compose.test.yml up -d --wait
+        timeout-minutes: 5
 
       - name: Run tests
         run: |
