@@ -39,7 +39,6 @@ WebUI\\Password_PBKDF2="@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVvdDtHA
     import os
     os.environ['TEST_DATA_PATH'] = str(test_data_dir.absolute())
 
-    # Use current user's UID/GID to avoid permission issues
     os.environ['PUID'] = str(os.getuid())
     os.environ['PGID'] = str(os.getgid())
 
