@@ -151,6 +151,11 @@ def run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_clea
 
             media_files_fixed = 0
             if config.fix_hardlinks and orphaned_files:
+                # Pause torrent to prevent redownload during hardlink fix
+                if not config.dry_run:
+                    logger.info(f"  Pausing torrent '{torrent_name}' during hardlink fix")
+                    qbt_client.torrents_pause(torrent_hashes=torrent_hash)
+
                 fix_results = hardlink_fixer.fix_orphaned_files(
                     orphaned_files,
                     media_index,
@@ -162,6 +167,11 @@ def run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_clea
                 stats.hardlinks_fixed += fix_results.fixed
                 stats.hardlinks_failed += fix_results.failed
                 media_files_fixed = fix_results.media_files_fixed
+
+                # Resume torrent after fixing
+                if not config.dry_run:
+                    logger.info(f"  Resuming torrent '{torrent_name}' after hardlink fix")
+                    qbt_client.torrents_resume(torrent_hashes=torrent_hash)
 
             if media_files_fixed > 0:
                 # Keep torrent if any media files were fixed
