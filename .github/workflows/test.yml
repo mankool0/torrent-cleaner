@@ -22,6 +22,7 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
+          pip install -r tests/requirements-test.txt
 
       - name: Start qBittorrent test container
         run: |
