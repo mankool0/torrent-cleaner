@@ -1,0 +1,4 @@
+qbittorrent-api==2025.11.1
+xxhash==3.6.0
+python-dotenv==1.2.1
+requests==2.32.5

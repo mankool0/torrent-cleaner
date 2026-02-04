@@ -1,0 +1,16 @@
+services:
+  torrent-cleaner:
+    build: .
+    container_name: torrent-cleaner
+    env_file: .env
+    volumes:
+      # Torrent directory - read-write for hardlink fixing
+      - /path/to/torrents:/data/torrents
+      # Media library - read-only
+      - /path/to/media:/data/media:ro
+      # Logs
+      - ./logs:/var/log/torrent-cleaner
+    restart: unless-stopped
+    environment:
+      # Override specific settings here if needed
+      - TZ=UTC
