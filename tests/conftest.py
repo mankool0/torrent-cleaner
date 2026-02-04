@@ -40,7 +40,7 @@ WebUI\\Password_PBKDF2="@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVvdDtHA
     os.environ['TEST_DATA_PATH'] = str(test_data_dir.absolute())
 
     subprocess.run(
-        ['docker-compose', '-f', 'docker-compose.test.yml', 'up', '-d'],
+        ['docker', 'compose', '-f', 'docker-compose.test.yml', 'up', '-d'],
         check=True
     )
 
@@ -75,7 +75,7 @@ WebUI\\Password_PBKDF2="@ByteArray(ARQ77eY1NUZaQsuDHbIMCA==:0WMRkYTUWVT9wVvdDtHA
 
     # Cleanup
     subprocess.run(
-        ['docker-compose', '-f', 'docker-compose.test.yml', 'down', '-v'],
+        ['docker', 'compose', '-f', 'docker-compose.test.yml', 'down', '-v'],
         check=True
     )
 

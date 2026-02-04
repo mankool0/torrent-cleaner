@@ -19,7 +19,7 @@ def set_torrent_test_metadata(torrent_hash, seeding_days, ratio):
         ratio: Upload/download ratio to set
     """
     subprocess.run(
-        ['docker-compose', '-f', 'docker-compose.test.yml', 'stop'],
+        ['docker', 'compose', '-f', 'docker-compose.test.yml', 'stop'],
         check=True,
         capture_output=True
     )
@@ -47,7 +47,7 @@ def set_torrent_test_metadata(torrent_hash, seeding_days, ratio):
         f.write(bencode.encode(data))
 
     subprocess.run(
-        ['docker-compose', '-f', 'docker-compose.test.yml', 'start'],
+        ['docker', 'compose', '-f', 'docker-compose.test.yml', 'start'],
         check=True,
         capture_output=True
     )
@@ -57,7 +57,7 @@ def set_torrent_test_metadata(torrent_hash, seeding_days, ratio):
 def stop_qbittorrent():
     """Stop the qBittorrent test container."""
     subprocess.run(
-        ['docker-compose', '-f', 'docker-compose.test.yml', 'stop'],
+        ['docker', 'compose', '-f', 'docker-compose.test.yml', 'stop'],
         check=True,
         capture_output=True
     )
@@ -66,7 +66,7 @@ def stop_qbittorrent():
 def start_qbittorrent():
     """Start the qBittorrent test container."""
     subprocess.run(
-        ['docker-compose', '-f', 'docker-compose.test.yml', 'start'],
+        ['docker', 'compose', '-f', 'docker-compose.test.yml', 'start'],
         check=True,
         capture_output=True
     )
@@ -76,7 +76,7 @@ def start_qbittorrent():
 def restart_qbittorrent():
     """Restart the qBittorrent test container."""
     subprocess.run(
-        ['docker-compose', '-f', 'docker-compose.test.yml', 'restart'],
+        ['docker', 'compose', '-f', 'docker-compose.test.yml', 'restart'],
         check=True,
         capture_output=True
     )
