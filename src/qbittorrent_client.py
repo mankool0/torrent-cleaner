@@ -66,6 +66,34 @@ class QBittorrentClient:
             self.logger.error(f"Failed to delete torrent {torrent_hash}: {e}")
             return False
 
+    def pause_torrent(self, torrent_hash: str):
+        """
+        Pause a torrent.
+
+        Args:
+            torrent_hash: Torrent hash
+        """
+        try:
+            self.client.torrents_pause(torrent_hashes=torrent_hash)
+            self.logger.debug(f"Paused torrent: {torrent_hash}")
+        except Exception as e:
+            self.logger.error(f"Failed to pause torrent {torrent_hash}: {e}")
+            raise
+
+    def resume_torrent(self, torrent_hash: str):
+        """
+        Resume a torrent.
+
+        Args:
+            torrent_hash: Torrent hash
+        """
+        try:
+            self.client.torrents_resume(torrent_hashes=torrent_hash)
+            self.logger.debug(f"Resumed torrent: {torrent_hash}")
+        except Exception as e:
+            self.logger.error(f"Failed to resume torrent {torrent_hash}: {e}")
+            raise
+
     def close(self):
         """Close the client connection."""
         try:
