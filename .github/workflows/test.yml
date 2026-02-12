@@ -24,16 +24,6 @@ jobs:
           pip install -r requirements.txt
           pip install -r tests/requirements-test.txt
 
-      - name: Start qBittorrent test container
-        run: |
-          docker compose -f docker-compose.test.yml up -d --wait
-        timeout-minutes: 5
-
       - name: Run tests
         run: |
           pytest tests/ -v --tb=short
-
-      - name: Stop qBittorrent container
-        if: always()
-        run: |
-          docker compose -f docker-compose.test.yml down -v
