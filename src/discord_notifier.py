@@ -127,6 +127,22 @@ class DiscordNotifier:
             },
         ])
 
+        space_total_gb = (summary.space_freed_dead_tracker_bytes + summary.space_freed_criteria_bytes) / (1024**3)
+        if space_total_gb > 0:
+            space_parts = []
+            if summary.space_freed_dead_tracker_bytes > 0:
+                space_parts.append(f"Dead trackers: {summary.space_freed_dead_tracker_bytes / (1024**3):.2f} GB")
+            if summary.space_freed_criteria_bytes > 0:
+                space_parts.append(f"Criteria: {summary.space_freed_criteria_bytes / (1024**3):.2f} GB")
+            space_value = f"{space_total_gb:.2f} GB"
+            if len(space_parts) == 2:
+                space_value += f"\n({', '.join(space_parts)})"
+            fields.append({
+                'name': 'Space Freed',
+                'value': space_value,
+                'inline': True
+            })
+
         if summary.deletion_reasons:
             reasons_text = '\n'.join([
                 f"• {reason}: {count}"

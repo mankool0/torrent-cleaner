@@ -13,10 +13,48 @@ from src.file_analyzer import FileAnalyzer
 from src.hardlink_fixer import HardlinkFixer
 from src.torrent_cleaner import TorrentCleaner
 from src.discord_notifier import DiscordNotifier
-from src.models import WorkflowStats
+from src.models import SizeIndex, WorkflowStats
+from typing import List
+import qbittorrentapi
 
 
-def run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_cleaner, size_index):
+def is_dead_tracker_torrent(qbt_client: QBittorrentClient, torrent: qbittorrentapi.TorrentDictionary, dead_messages: List[str]) -> bool:
+    """
+    Check if all real trackers for a torrent report known-dead messages.
+
+    Args:
+        qbt_client: QBittorrentClient instance
+        torrent: Torrent dictionary from qBittorrent API
+        dead_messages: List of substrings to match against tracker error messages
+
+    Returns:
+        True if all real trackers are dead
+    """
+    logger = logging.getLogger(__name__)
+    try:
+        trackers = qbt_client.torrents_trackers(torrent.hash)
+    except Exception as e:
+        logger.warning(f"Could not get trackers for {torrent.name}: {e}")
+        return False
+
+    # Filter out DHT/PeX/LSD pseudo-trackers (url starts with **)
+    real_trackers = [t for t in trackers if not t.url.startswith('**')]
+
+    if not real_trackers:
+        return False
+
+    for tracker in real_trackers:
+        # status 4 = "Tracker has been contacted, but it is not working (or doesn't send proper replies)"
+        if tracker.status != 4:
+            return False
+        msg = (tracker.msg or '').lower()
+        if msg not in (dead_msg.lower() for dead_msg in dead_messages):
+            return False
+
+    return True
+
+
+def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: FileAnalyzer, hardlink_fixer: HardlinkFixer, torrent_cleaner: TorrentCleaner, size_index: SizeIndex) -> WorkflowStats:
     """
     Run the torrent cleaning workflow.
 
@@ -36,6 +74,35 @@ def run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_clea
 
     logger.info("Retrieving torrents from qBittorrent...")
     torrents = qbt_client.torrents_info()
+
+    # --- Dead tracker pass ---
+    deleted_hashes = set()
+    if config.delete_dead_trackers:
+        logger.info("Checking for dead tracker torrents...")
+        for torrent in torrents:
+            if is_dead_tracker_torrent(qbt_client, torrent, config.dead_tracker_messages):
+                logger.info(f"  Dead tracker detected: {torrent.name}")
+                size = torrent.size
+                success = torrent_cleaner.delete_torrent(
+                    torrent.hash,
+                    torrent.name,
+                    delete_files=True
+                )
+                if success:
+                    deleted_hashes.add(torrent.hash)
+                    stats.torrents_deleted_dead_tracker += 1
+                    stats.space_freed_dead_tracker_bytes += size
+                    stats.deleted_torrents.append(f"[dead tracker] {torrent.name}")
+                    stats.torrents_deleted += 1
+
+        if deleted_hashes:
+            logger.info(f"Dead tracker pass: deleted {len(deleted_hashes)} torrent(s)")
+            # Re-fetch torrents to get fresh state after deletions
+            torrents = qbt_client.torrents_info()
+            # Filter out dry-run "deleted" torrents that still exist in qBittorrent
+            torrents = [t for t in torrents if t.hash not in deleted_hashes]
+        else:
+            logger.info("Dead tracker pass: no dead tracker torrents found")
 
     # Build torrent groups for aggregation
     # When multiple torrents share files (hardlinked), aggregate their stats
@@ -191,6 +258,7 @@ def run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_clea
 
                 if success:
                     stats.torrents_deleted += 1
+                    stats.space_freed_criteria_bytes += torrent.size
                     stats.deleted_torrents.append(torrent_name)
 
                     reason_key = f"age={deletion_check.stats.age}, ratio={deletion_check.stats.ratio:.2f}"
@@ -203,7 +271,7 @@ def run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_clea
     return stats
 
 
-def main():
+def main() -> int:
     """Main workflow for torrent cleaning."""
     # Initialize a basic stderr logger before Config so startup errors are formatted
     logger = setup_logger('torrent-cleaner', 'INFO')
@@ -264,6 +332,13 @@ def main():
         logger.info(f"Hardlinks fixed: {stats.hardlinks_fixed}")
         logger.info(f"Hardlinks failed: {stats.hardlinks_failed}")
         logger.info(f"Orphaned files found: {stats.orphaned_files_found}")
+
+        space_dead = stats.space_freed_dead_tracker_bytes / (1024**3)
+        space_criteria = stats.space_freed_criteria_bytes / (1024**3)
+        space_total = (stats.space_freed_dead_tracker_bytes + stats.space_freed_criteria_bytes) / (1024**3)
+        logger.info(f"Space freed (dead trackers): {space_dead:.2f} GB")
+        logger.info(f"Space freed (criteria):      {space_criteria:.2f} GB")
+        logger.info(f"Space freed (total):         {space_total:.2f} GB")
 
         if stats.deleted_torrents:
             logger.info(f"\nDeleted torrents:")

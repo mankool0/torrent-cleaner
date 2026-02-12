@@ -118,6 +118,9 @@ class WorkflowStats:
     torrents_kept: int = 0
     torrents_kept_hardlinks_fixed: int = 0
     torrents_kept_criteria_not_met: int = 0
+    torrents_deleted_dead_tracker: int = 0
+    space_freed_dead_tracker_bytes: int = 0
+    space_freed_criteria_bytes: int = 0
     hardlinks_attempted: int = 0
     hardlinks_fixed: int = 0
     hardlinks_failed: int = 0

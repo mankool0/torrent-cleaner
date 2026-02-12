@@ -2,7 +2,6 @@
 
 import qbittorrentapi
 from qbittorrentapi import Client
-from typing import List
 import logging
 
 
@@ -104,7 +103,7 @@ class QBittorrentClient:
 
     # API-standard methods with logging and error handling
 
-    def torrents_info(self, **kwargs) -> List[qbittorrentapi.TorrentDictionary]:
+    def torrents_info(self, **kwargs) -> qbittorrentapi.TorrentInfoList:
         """
         Get torrents info from qBittorrent.
 
@@ -113,7 +112,7 @@ class QBittorrentClient:
                      See qbittorrentapi documentation for available parameters.
 
         Returns:
-            List of torrent dictionaries
+            TorrentInfoList
         """
         try:
             torrents = self.client.torrents_info(**kwargs)
@@ -123,7 +122,7 @@ class QBittorrentClient:
             self.logger.error(f"Failed to get torrents: {e}")
             raise
 
-    def torrents_files(self, torrent_hash: str) -> List[qbittorrentapi.TorrentFile]:
+    def torrents_files(self, torrent_hash: str) -> qbittorrentapi.TorrentFilesList:
         """
         Get list of files for a specific torrent.
 
@@ -131,13 +130,30 @@ class QBittorrentClient:
             torrent_hash: Torrent hash
 
         Returns:
-            List of torrent files
+            TorrentFilesList
         """
         try:
             files = self.client.torrents_files(torrent_hash=torrent_hash)
             return files
         except Exception as e:
             self.logger.error(f"Failed to get files for torrent {torrent_hash}: {e}")
+            raise
+
+    def torrents_trackers(self, torrent_hash: str) -> qbittorrentapi.TrackersList:
+        """
+        Get list of trackers for a specific torrent.
+
+        Args:
+            torrent_hash: Torrent hash
+
+        Returns:
+            TrackersList
+        """
+        try:
+            trackers = self.client.torrents_trackers(torrent_hash=torrent_hash)
+            return trackers
+        except Exception as e:
+            self.logger.error(f"Failed to get trackers for torrent {torrent_hash}: {e}")
             raise
 
     def torrents_add(self, **kwargs):

@@ -43,6 +43,11 @@ class Config:
 
         self.discord_webhook_url = os.getenv('DISCORD_WEBHOOK_URL', '')
 
+        # Dead tracker cleanup
+        self.delete_dead_trackers = os.getenv('DELETE_DEAD_TRACKERS', 'false').lower() in ('true', '1', 'yes')
+        dead_msg_raw = os.getenv('DEAD_TRACKER_MESSAGES', '')
+        self.dead_tracker_messages = [m.strip() for m in dead_msg_raw.split('|') if m.strip()]
+
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
         self.log_file = os.getenv('LOG_FILE', str(self.data_dir / 'logs' / 'cleaner.log'))
 
