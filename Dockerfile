@@ -14,7 +14,7 @@ COPY src/ ./src/
 COPY scripts/ ./scripts/
 RUN chmod +x ./scripts/*.sh
 
-RUN mkdir -p /var/log/torrent-cleaner
+RUN mkdir -p /app/data/torrent-cleaner/cache /app/data/torrent-cleaner/logs
 
 ENTRYPOINT ["/app/scripts/entrypoint.sh"]
 

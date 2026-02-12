@@ -16,6 +16,7 @@ def torrent_cleaner(test_dirs):
     os.environ['QBITTORRENT_PASSWORD'] = 'adminadmin'
     os.environ['TORRENT_DIR'] = str(test_dirs['torrents'])
     os.environ['MEDIA_LIBRARY_DIR'] = str(test_dirs['media'])
+    os.environ['DATA_DIR'] = str(test_dirs['root'] / 'data')
 
     config = Config()
     config.min_seeding_duration = '30d'

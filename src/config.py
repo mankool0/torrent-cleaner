@@ -14,7 +14,10 @@ class Config:
         load_dotenv()
 
         self.qbt_host = self._get_required('QBITTORRENT_HOST')
-        self.qbt_port = int(os.getenv('QBITTORRENT_PORT', '8080'))
+        try:
+            self.qbt_port = int(os.getenv('QBITTORRENT_PORT', '8080'))
+        except ValueError:
+            raise ValueError(f"QBITTORRENT_PORT must be an integer, got: '{os.getenv('QBITTORRENT_PORT')}'")
         self.qbt_username = self._get_required('QBITTORRENT_USERNAME')
         self.qbt_password = self._get_required('QBITTORRENT_PASSWORD')
 
@@ -22,15 +25,26 @@ class Config:
         self.media_library_dir = Path(os.getenv('MEDIA_LIBRARY_DIR', '/data/media'))
 
         self.min_seeding_duration = os.getenv('MIN_SEEDING_DURATION', '30d')
-        self.min_ratio = float(os.getenv('MIN_RATIO', '2.0'))
+        try:
+            self.min_ratio = float(os.getenv('MIN_RATIO', '2.0'))
+        except ValueError:
+            raise ValueError(f"MIN_RATIO must be a number, got: '{os.getenv('MIN_RATIO')}'")
+
 
         self.dry_run = os.getenv('DRY_RUN', 'true').lower() in ('true', '1', 'yes')
         self.fix_hardlinks = os.getenv('FIX_HARDLINKS', 'true').lower() in ('true', '1', 'yes')
 
+        # Data directory base path (used for cache and logs)
+        self.data_dir = Path(os.getenv('DATA_DIR', '/app/data/torrent-cleaner'))
+
+        # File hash cache settings
+        self.enable_cache = os.getenv('ENABLE_CACHE', 'true').lower() in ('true', '1', 'yes')
+        self.cache_db_path = os.getenv('CACHE_DB_PATH', None)  # None = use default location
+
         self.discord_webhook_url = os.getenv('DISCORD_WEBHOOK_URL', '')
 
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
-        self.log_file = os.getenv('LOG_FILE', '/var/log/torrent-cleaner/cleaner.log')
+        self.log_file = os.getenv('LOG_FILE', str(self.data_dir / 'logs' / 'cleaner.log'))
 
         self._validate()
 
@@ -51,6 +65,20 @@ class Config:
 
         if not os.access(self.torrent_dir, os.W_OK):
             raise ValueError(f"Torrent directory is not writable: {self.torrent_dir}")
+
+        try:
+            self.data_dir.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            raise ValueError(f"Cannot create data directory {self.data_dir}: {e}")
+        if not os.access(self.data_dir, os.W_OK):
+            raise ValueError(f"Data directory is not writable: {self.data_dir}")
+
+        if self.cache_db_path:
+            cache_parent = Path(self.cache_db_path).parent
+            try:
+                cache_parent.mkdir(parents=True, exist_ok=True)
+            except OSError as e:
+                raise ValueError(f"Cannot create cache directory {cache_parent}: {e}")
 
         if self.min_ratio < 0:
             raise ValueError(f"MIN_RATIO must be >= 0, got: {self.min_ratio}")
@@ -112,6 +140,8 @@ class Config:
             f"  min_ratio={self.min_ratio}\n"
             f"  dry_run={self.dry_run}\n"
             f"  fix_hardlinks={self.fix_hardlinks}\n"
+            f"  enable_cache={self.enable_cache}\n"
+            f"  cache_db_path={self.cache_db_path or 'default'}\n"
             f"  discord_webhook={'configured' if self.discord_webhook_url else 'not configured'}\n"
             f")"
         )

@@ -8,8 +8,8 @@ services:
       - /path/to/torrents:/data/torrents
       # Media library
       - /path/to/media:/data/media:ro
-      # Logs
-      - ./logs:/var/log/torrent-cleaner
+      # Cache and logs
+      - ./cleaner-data:/app/data/torrent-cleaner
     restart: unless-stopped
     environment:
       # Override specific settings here if needed

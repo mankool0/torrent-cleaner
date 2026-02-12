@@ -2,11 +2,11 @@
 
 import os
 from pathlib import Path
-from typing import Dict, List, Set
+from typing import Dict, List, Optional, Set
 import logging
 
 from src.utils.hash_utils import hash_file
-from src.models import MediaFileInfo, OrphanDetectionResult, OrphanDetectionStats
+from src.models import CacheStats, OrphanDetectionResult, OrphanDetectionStats
 
 
 class FileAnalyzer:
@@ -15,10 +15,39 @@ class FileAnalyzer:
     # Media file extensions to prioritize
     MEDIA_EXTENSIONS = {'.mkv', '.mp4', '.avi', '.mov', '.m4v', '.wmv', '.flv', '.webm', '.ts', '.m2ts'}
 
-    def __init__(self):
-        """Initialize file analyzer."""
+    def __init__(self, cache=None):
+        """Initialize file analyzer.
+
+        Args:
+            cache: Optional FileCache instance for caching file hashes.
+        """
         self.logger = logging.getLogger(__name__)
-        self.media_index: Dict[str, MediaFileInfo] = {}
+        self.cache = cache
+        self._cache_hits = 0
+        self._cache_misses = 0
+        self._size_index: Dict[int, List[str]] = {}
+
+    def _hash_file_with_cache(self, file_path: str) -> str:
+        """Hash a file, using cache if available.
+
+        Args:
+            file_path: Path to file
+
+        Returns:
+            Hash string
+        """
+        if self.cache:
+            cached = self.cache.get_cached_hash(file_path)
+            if cached is not None:
+                self._cache_hits += 1
+                return cached
+
+            self._cache_misses += 1
+            file_hash = hash_file(file_path)
+            self.cache.store_hash(file_path, file_hash)
+            return file_hash
+
+        return hash_file(file_path)
 
     def get_hardlink_count(self, file_path: str) -> int:
         """
@@ -91,24 +120,24 @@ class FileAnalyzer:
             stats=stats
         )
 
-    def build_media_library_index(self, media_dir: Path, extensions: Set[str] | None = None) -> Dict[str, MediaFileInfo]:
+    def build_size_index(self, media_dir: Path, extensions: Set[str] | None = None) -> Dict[int, List[str]]:
         """
-        Build hash index of all files in media library.
+        Build size-based index of all files in media library.
 
         Args:
             media_dir: Root directory of media library
-            extensions: Optional set of file extensions to index (e.g., {'.mkv', '.mp4'})
-                       If None, indexes all files
+            extensions: Optional set of file extensions to index.
+                       If None, indexes all files.
 
         Returns:
-            Dictionary mapping file hash to MediaFileInfo
+            Dictionary mapping file size to list of file paths
         """
-        self.logger.info(f"Building media library index for: {media_dir}")
+        self.logger.info(f"Building media library size index for: {media_dir}")
 
         if not media_dir.exists():
             raise ValueError(f"Media directory does not exist: {media_dir}")
 
-        index = {}
+        size_index: Dict[int, List[str]] = {}
         file_count = 0
         error_count = 0
 
@@ -116,82 +145,87 @@ class FileAnalyzer:
             if not file_path.is_file():
                 continue
 
-            # Filter by extension if specified
             if extensions and file_path.suffix.lower() not in extensions:
                 continue
 
             try:
-                # Calculate hash
-                file_hash = hash_file(file_path)
-                stat_info = os.stat(file_path)
-
-                # Store in index (last occurrence wins if hash collision)
-                index[file_hash] = MediaFileInfo(
-                    path=str(file_path),
-                    size=stat_info.st_size,
-                    inode=stat_info.st_ino
-                )
-
+                size = os.stat(file_path).st_size
+                size_index.setdefault(size, []).append(str(file_path))
                 file_count += 1
 
-                if file_count % 100 == 0:
+                if file_count % 1000 == 0:
                     self.logger.debug(f"Indexed {file_count} files...")
 
             except (OSError, PermissionError) as e:
                 self.logger.error(f"Error indexing file {file_path}: {e}")
                 error_count += 1
 
-        self.logger.info(f"Media library index built: {file_count} files indexed, {error_count} errors")
-        self.media_index = index
-        return index
+        self.logger.info(f"Size index built: {file_count} files indexed, {error_count} errors")
+        self._size_index = size_index
+        return size_index
 
-    def find_identical_file(self, orphaned_file: str, media_index: Dict[str, MediaFileInfo] | None = None) -> str | None:
+    def find_identical_file(
+        self,
+        orphaned_file: str,
+        size_index: Dict[int, List[str]] | None = None,
+    ) -> Optional[str]:
         """
-        Find identical file in media library by hash.
+        Find identical file in media library using candidate-based matching.
+
+        Finds candidates by file size, then hashes only those candidates
+        to confirm a match.
 
         Args:
             orphaned_file: Path to orphaned file
-            media_index: Optional media index (uses self.media_index if not provided)
+            size_index: Optional size-based index (uses self._size_index if not provided)
 
         Returns:
             Path to identical file in media library, or None if not found
         """
-        if media_index is None:
-            media_index = self.media_index
+        effective_size_index = size_index or self._size_index
+        if not effective_size_index:
+            self.logger.warning("No size index available for find_identical_file")
+            return None
 
         try:
-            # Calculate hash of orphaned file
-            orphaned_hash = hash_file(orphaned_file)
-
-            # Look up in media index
-            if orphaned_hash in media_index:
-                media_file_info = media_index[orphaned_hash]
-                media_file_path = media_file_info.path
-
-                # Verify file still exists and size matches
-                media_path = Path(media_file_path)
-                if not media_path.exists():
-                    self.logger.warning(f"Media file no longer exists: {media_file_path}")
-                    return None
-
-                orphaned_size = os.stat(orphaned_file).st_size
-                media_size = media_file_info.size
-
-                if orphaned_size != media_size:
-                    self.logger.warning(
-                        f"Size mismatch for hash {orphaned_hash}: "
-                        f"orphaned={orphaned_size}, media={media_size}"
-                    )
-                    return None
-
-                self.logger.debug(f"Found identical file for {orphaned_file}: {media_file_path}")
-                return media_file_path
-
+            orphaned_size = os.stat(orphaned_file).st_size
+        except OSError as e:
+            self.logger.error(f"Cannot stat orphaned file {orphaned_file}: {e}")
             return None
 
+        candidates = effective_size_index.get(orphaned_size)
+        if not candidates:
+            return None
+
+        try:
+            orphaned_hash = self._hash_file_with_cache(str(orphaned_file))
         except Exception as e:
-            self.logger.error(f"Error finding identical file for {orphaned_file}: {e}")
+            self.logger.error(f"Error hashing orphaned file {orphaned_file}: {e}")
             return None
+
+        for candidate in candidates:
+            try:
+                if not Path(candidate).exists():
+                    continue
+                candidate_hash = self._hash_file_with_cache(candidate)
+                if candidate_hash == orphaned_hash:
+                    self.logger.debug(f"Found identical file for {orphaned_file}: {candidate}")
+                    return candidate
+            except Exception as e:
+                self.logger.error(f"Error hashing candidate {candidate}: {e}")
+                continue
+
+        return None
+
+    def get_cache_stats(self) -> CacheStats:
+        """Get cache hit/miss statistics."""
+        total = self._cache_hits + self._cache_misses
+        hit_rate = self._cache_hits / total if total > 0 else 0.0
+        return CacheStats(
+            hits=self._cache_hits,
+            misses=self._cache_misses,
+            hit_rate=hit_rate,
+        )
 
     def is_media_file(self, file_path: str) -> bool:
         """

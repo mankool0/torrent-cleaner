@@ -20,6 +20,7 @@ def cleaner_config(test_dirs):
     os.environ['QBITTORRENT_PASSWORD'] = 'adminadmin'
     os.environ['TORRENT_DIR'] = str(test_dirs['torrents'])
     os.environ['MEDIA_LIBRARY_DIR'] = str(test_dirs['media'])
+    os.environ['DATA_DIR'] = str(test_dirs['root'] / 'data')
 
     config = Config()
     config.media_paths = [str(test_dirs['media'])]
@@ -246,8 +247,8 @@ def test_healthy_hardlinked_torrent_kept(qb_client, preseeded_torrent, test_dirs
     hardlink_fixer = HardlinkFixer()
     torrent_cleaner = TorrentCleaner(cleaner_config, qb_client)
 
-    media_index = file_analyzer.build_media_library_index(test_dirs['media'])
-    stats = run_workflow(cleaner_config, qb_client, file_analyzer, hardlink_fixer, torrent_cleaner, media_index)
+    size_index = file_analyzer.build_size_index(test_dirs['media'])
+    stats = run_workflow(cleaner_config, qb_client, file_analyzer, hardlink_fixer, torrent_cleaner, size_index)
 
     assert stats.torrents_deleted == 0, "Healthy hardlinked torrent should not be deleted"
     assert stats.torrents_kept == 1, "Torrent should be kept"
@@ -303,8 +304,8 @@ def test_hardlinked_pair_aggregation(qb_client, preseeded_torrent, test_dirs, cl
     file_analyzer = FileAnalyzer()
     hardlink_fixer = HardlinkFixer()
     torrent_cleaner = TorrentCleaner(cleaner_config, qb_client)
-    media_index = file_analyzer.build_media_library_index(test_dirs['media'])
-    stats = run_workflow(cleaner_config, qb_client, file_analyzer, hardlink_fixer, torrent_cleaner, media_index)
+    size_index = file_analyzer.build_size_index(test_dirs['media'])
+    stats = run_workflow(cleaner_config, qb_client, file_analyzer, hardlink_fixer, torrent_cleaner, size_index)
 
     # Verify expected results
     assert stats.torrents_deleted == expected_deleted, \

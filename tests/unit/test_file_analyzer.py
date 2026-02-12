@@ -5,7 +5,6 @@ import os
 import tempfile
 from pathlib import Path
 from src.file_analyzer import FileAnalyzer
-from src.models import MediaFileInfo
 from src.utils.hash_utils import hash_file
 
 
@@ -55,11 +54,11 @@ class TestIsMediaFile:
         assert analyzer.is_media_file('movie') == False
 
 
-class TestBuildMediaLibraryIndex:
-    """Test build_media_library_index() method."""
+class TestBuildSizeIndex:
+    """Test build_size_index() method."""
 
-    def test_index_single_file(self):
-        """Test indexing a single file."""
+    def test_single_file(self):
+        """Test size indexing a single file."""
         analyzer = FileAnalyzer()
 
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -67,34 +66,47 @@ class TestBuildMediaLibraryIndex:
             file1 = media_dir / 'movie.mkv'
             file1.write_bytes(b'Movie content')
 
-            index = analyzer.build_media_library_index(media_dir)
+            index = analyzer.build_size_index(media_dir)
 
             assert len(index) == 1
-            file_hash = hash_file(file1)
-            assert file_hash in index
-            assert isinstance(index[file_hash], MediaFileInfo)
-            assert index[file_hash].path == str(file1)
-            assert index[file_hash].size == 13
-            assert index[file_hash].inode == os.stat(file1).st_ino
+            size = os.stat(file1).st_size
+            assert size in index
+            assert str(file1) in index[size]
 
-    def test_index_multiple_files(self):
-        """Test indexing multiple files."""
+    def test_multiple_same_size(self):
+        """Test that files with same size are grouped."""
         analyzer = FileAnalyzer()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             media_dir = Path(tmpdir)
             file1 = media_dir / 'movie1.mkv'
-            file2 = media_dir / 'movie2.mp4'
-            file1.write_bytes(b'Movie 1')
-            file2.write_bytes(b'Movie 2')
+            file2 = media_dir / 'movie2.mkv'
+            content = b'Same size content'
+            file1.write_bytes(content)
+            file2.write_bytes(content)
 
-            index = analyzer.build_media_library_index(media_dir)
+            index = analyzer.build_size_index(media_dir)
+
+            size = len(content)
+            assert size in index
+            assert len(index[size]) == 2
+
+    def test_different_sizes(self):
+        """Test files with different sizes are separate."""
+        analyzer = FileAnalyzer()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media_dir = Path(tmpdir)
+            file1 = media_dir / 'small.mkv'
+            file2 = media_dir / 'large.mkv'
+            file1.write_bytes(b'small')
+            file2.write_bytes(b'much larger content')
+
+            index = analyzer.build_size_index(media_dir)
 
             assert len(index) == 2
-            assert hash_file(file1) in index
-            assert hash_file(file2) in index
 
-    def test_index_nested_directories(self):
+    def test_nested_directories(self):
         """Test indexing files in nested directories."""
         analyzer = FileAnalyzer()
 
@@ -106,77 +118,45 @@ class TestBuildMediaLibraryIndex:
             file1 = media_dir / 'movie1.mkv'
             file2 = subdir / 'movie2.mkv'
             file1.write_bytes(b'Movie 1')
-            file2.write_bytes(b'Movie 2')
+            file2.write_bytes(b'Movie 22')
 
-            index = analyzer.build_media_library_index(media_dir)
+            index = analyzer.build_size_index(media_dir)
 
             assert len(index) == 2
-            assert hash_file(file1) in index
-            assert hash_file(file2) in index
 
-    def test_index_with_extension_filter(self):
-        """Test indexing with extension filter."""
+    def test_with_extension_filter(self):
+        """Test size index with extension filter."""
         analyzer = FileAnalyzer()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             media_dir = Path(tmpdir)
-            mkv_file = media_dir / 'movie.mkv'
-            mp4_file = media_dir / 'movie.mp4'
-            srt_file = media_dir / 'subtitle.srt'
+            mkv = media_dir / 'movie.mkv'
+            srt = media_dir / 'subtitle.srt'
+            mkv.write_bytes(b'MKV content')
+            srt.write_bytes(b'SRT content')
 
-            mkv_file.write_bytes(b'MKV content')
-            mp4_file.write_bytes(b'MP4 content')
-            srt_file.write_bytes(b'Subtitle')
+            index = analyzer.build_size_index(media_dir, extensions={'.mkv'})
 
-            # Index only .mkv files
-            index = analyzer.build_media_library_index(media_dir, extensions={'.mkv'})
+            # Only mkv should be indexed
+            assert any(str(mkv) in paths for paths in index.values())
+            assert not any(str(srt) in paths for paths in index.values())
 
-            assert len(index) == 1
-            assert hash_file(mkv_file) in index
-            assert hash_file(mp4_file) not in index
-            assert hash_file(srt_file) not in index
-
-    def test_index_empty_directory(self):
-        """Test indexing an empty directory."""
+    def test_empty_directory(self):
+        """Test size index of empty directory."""
         analyzer = FileAnalyzer()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            media_dir = Path(tmpdir)
-            index = analyzer.build_media_library_index(media_dir)
-
+            index = analyzer.build_size_index(Path(tmpdir))
             assert len(index) == 0
 
-    def test_index_directory_not_exist(self):
+    def test_nonexistent_directory(self):
         """Test that ValueError is raised for non-existent directory."""
         analyzer = FileAnalyzer()
 
         with pytest.raises(ValueError, match="Media directory does not exist"):
-            analyzer.build_media_library_index(Path('/nonexistent/path'))
+            analyzer.build_size_index(Path('/nonexistent/path'))
 
-    def test_index_hash_collision(self):
-        """Test that last file wins on hash collision."""
-        analyzer = FileAnalyzer()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            media_dir = Path(tmpdir)
-
-            # Create two files with identical content (same hash)
-            file1 = media_dir / 'duplicate1.mkv'
-            file2 = media_dir / 'duplicate2.mkv'
-            content = b'Identical content'
-            file1.write_bytes(content)
-            file2.write_bytes(content)
-
-            index = analyzer.build_media_library_index(media_dir)
-
-            # Should only have 1 entry (hash collision - last one wins)
-            assert len(index) == 1
-            file_hash = hash_file(file1)
-            assert file_hash in index
-            # Last file processed should win (alphabetically: duplicate2.mkv)
-            assert 'duplicate2.mkv' in index[file_hash].path or 'duplicate1.mkv' in index[file_hash].path
-
-    def test_index_skips_directories(self):
+    def test_skips_directories(self):
         """Test that directories are skipped during indexing."""
         analyzer = FileAnalyzer()
 
@@ -188,155 +168,184 @@ class TestBuildMediaLibraryIndex:
             file1 = media_dir / 'movie.mkv'
             file1.write_bytes(b'Movie')
 
-            index = analyzer.build_media_library_index(media_dir)
+            index = analyzer.build_size_index(media_dir)
 
-            # Should only index the file, not the directory
-            assert len(index) == 1
+            total_files = sum(len(paths) for paths in index.values())
+            assert total_files == 1
 
 
 class TestFindIdenticalFile:
     """Test find_identical_file() method."""
 
-    def test_find_exact_match(self):
-        """Test finding exact match in media index."""
+    def test_exact_match(self):
+        """Test finding exact match via size index."""
         analyzer = FileAnalyzer()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
 
-            # Create orphaned file
             orphaned_file = tmpdir / 'orphan.mkv'
             orphaned_file.write_bytes(b'Movie content')
 
-            # Create media file with same content
-            media_file = tmpdir / 'media.mkv'
+            media_file = tmpdir / 'media' / 'movie.mkv'
+            media_file.parent.mkdir()
             media_file.write_bytes(b'Movie content')
 
-            # Build index
-            media_index = {
-                hash_file(media_file): MediaFileInfo(
-                    path=str(media_file),
-                    size=os.stat(media_file).st_size,
-                    inode=os.stat(media_file).st_ino
-                )
-            }
+            size = os.stat(orphaned_file).st_size
+            size_index = {size: [str(media_file)]}
 
-            result = analyzer.find_identical_file(str(orphaned_file), media_index)
+            result = analyzer.find_identical_file(str(orphaned_file), size_index=size_index)
 
             assert result == str(media_file)
 
-    def test_find_no_match(self):
-        """Test when no match exists in media index."""
+    def test_no_match_different_content(self):
+        """Test no match when content differs (same size)."""
         analyzer = FileAnalyzer()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
 
             orphaned_file = tmpdir / 'orphan.mkv'
-            orphaned_file.write_bytes(b'Unique content')
+            orphaned_file.write_bytes(b'Content AAAA')
 
             media_file = tmpdir / 'media.mkv'
-            media_file.write_bytes(b'Different content')
+            media_file.write_bytes(b'Content BBBB')
 
-            media_index = {
-                hash_file(media_file): MediaFileInfo(
-                    path=str(media_file),
-                    size=os.stat(media_file).st_size,
-                    inode=os.stat(media_file).st_ino
-                )
-            }
+            size = os.stat(orphaned_file).st_size
+            size_index = {size: [str(media_file)]}
 
-            result = analyzer.find_identical_file(str(orphaned_file), media_index)
+            result = analyzer.find_identical_file(str(orphaned_file), size_index=size_index)
 
             assert result is None
 
-    def test_find_media_file_not_exists(self):
-        """Test when media file in index no longer exists."""
+    def test_no_match_wrong_size(self):
+        """Test no match when no candidates have matching size."""
         analyzer = FileAnalyzer()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
 
             orphaned_file = tmpdir / 'orphan.mkv'
-            orphaned_file.write_bytes(b'Content')
+            orphaned_file.write_bytes(b'Short')
 
-            # Create media index pointing to non-existent file
-            media_index = {
-                hash_file(orphaned_file): MediaFileInfo(
-                    path='/nonexistent/media.mkv',
-                    size=7,
-                    inode=12345
-                )
-            }
+            media_file = tmpdir / 'media.mkv'
+            media_file.write_bytes(b'Much longer content here')
 
-            result = analyzer.find_identical_file(str(orphaned_file), media_index)
+            media_size = os.stat(media_file).st_size
+            size_index = {media_size: [str(media_file)]}
+
+            result = analyzer.find_identical_file(str(orphaned_file), size_index=size_index)
 
             assert result is None
 
-    def test_find_size_mismatch(self):
-        """Test when hash matches but size doesn't (corrupted index)."""
+    def test_uses_internal_size_index(self):
+        """Test that find_identical_file uses self._size_index when set."""
         analyzer = FileAnalyzer()
 
         with tempfile.TemporaryDirectory() as tmpdir:
             tmpdir = Path(tmpdir)
 
             orphaned_file = tmpdir / 'orphan.mkv'
-            orphaned_file.write_bytes(b'Content')
+            orphaned_file.write_bytes(b'Movie content')
 
-            media_file = tmpdir / 'media.mkv'
-            media_file.write_bytes(b'Content')
+            media_dir = tmpdir / 'media'
+            media_dir.mkdir()
+            media_file = media_dir / 'movie.mkv'
+            media_file.write_bytes(b'Movie content')
 
-            # Create index with wrong size
-            media_index = {
-                hash_file(media_file): MediaFileInfo(
-                    path=str(media_file),
-                    size=9999,  # Wrong size
-                    inode=os.stat(media_file).st_ino
-                )
-            }
+            analyzer.build_size_index(media_dir)
 
-            result = analyzer.find_identical_file(str(orphaned_file), media_index)
-
-            assert result is None
-
-    def test_find_uses_self_media_index(self):
-        """Test that method uses self.media_index when media_index param is None."""
-        analyzer = FileAnalyzer()
-
-        with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir = Path(tmpdir)
-
-            orphaned_file = tmpdir / 'orphan.mkv'
-            orphaned_file.write_bytes(b'Content')
-
-            media_file = tmpdir / 'media.mkv'
-            media_file.write_bytes(b'Content')
-
-            # Set analyzer's media_index
-            analyzer.media_index = {
-                hash_file(media_file): MediaFileInfo(
-                    path=str(media_file),
-                    size=os.stat(media_file).st_size,
-                    inode=os.stat(media_file).st_ino
-                )
-            }
-
+            # Call without explicit size_index
             result = analyzer.find_identical_file(str(orphaned_file))
 
             assert result == str(media_file)
 
-    def test_find_empty_index(self):
-        """Test finding in empty media index."""
+    def test_no_size_index_returns_none(self):
+        """Test that find_identical_file returns None when no index available."""
         analyzer = FileAnalyzer()
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            tmpdir = Path(tmpdir)
-
-            orphaned_file = tmpdir / 'orphan.mkv'
+            orphaned_file = Path(tmpdir) / 'orphan.mkv'
             orphaned_file.write_bytes(b'Content')
 
-            media_index = {}
-
-            result = analyzer.find_identical_file(str(orphaned_file), media_index)
-
+            result = analyzer.find_identical_file(str(orphaned_file))
             assert result is None
+
+
+class TestFileAnalyzerWithCache:
+    """Test FileAnalyzer with cache integration."""
+
+    def test_works_without_cache(self):
+        """Test that FileAnalyzer works fine without cache."""
+        analyzer = FileAnalyzer(cache=None)
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media_dir = Path(tmpdir)
+            file1 = media_dir / 'movie.mkv'
+            file1.write_bytes(b'Movie content')
+
+            index = analyzer.build_size_index(media_dir)
+            assert len(index) == 1
+
+    def test_cache_populates_on_find(self):
+        """Test that finding a file populates the cache."""
+        from src.file_cache import FileCache
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            db_path = str(tmpdir / 'cache.db')
+
+            cache = FileCache(db_path=db_path)
+            analyzer = FileAnalyzer(cache=cache)
+
+            media_dir = tmpdir / 'media'
+            media_dir.mkdir()
+            media_file = media_dir / 'movie.mkv'
+            media_file.write_bytes(b'Movie content')
+
+            orphaned_file = tmpdir / 'orphan.mkv'
+            orphaned_file.write_bytes(b'Movie content')
+
+            size_index = analyzer.build_size_index(media_dir)
+            analyzer.find_identical_file(str(orphaned_file), size_index=size_index)
+
+            # Both files should now be cached
+            assert cache.get_cached_hash(str(media_file)) is not None
+            assert cache.get_cached_hash(str(orphaned_file)) is not None
+
+            cache.close()
+
+    def test_cache_hits_tracked(self):
+        """Test that cache hits/misses are tracked."""
+        from src.file_cache import FileCache
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+            db_path = str(tmpdir / 'cache.db')
+
+            cache = FileCache(db_path=db_path)
+            analyzer = FileAnalyzer(cache=cache)
+
+            media_dir = tmpdir / 'media'
+            media_dir.mkdir()
+            media_file = media_dir / 'movie.mkv'
+            media_file.write_bytes(b'Movie content')
+
+            orphaned_file = tmpdir / 'orphan.mkv'
+            orphaned_file.write_bytes(b'Movie content')
+
+            size_index = analyzer.build_size_index(media_dir)
+
+            # First find: both files are cache misses
+            analyzer.find_identical_file(str(orphaned_file), size_index=size_index)
+            stats = analyzer.get_cache_stats()
+            assert stats.misses == 2
+            assert stats.hits == 0
+
+            # Second find: both files are cache hits
+            analyzer.find_identical_file(str(orphaned_file), size_index=size_index)
+            stats = analyzer.get_cache_stats()
+            assert stats.hits == 2
+            assert stats.misses == 2
+
+            cache.close()

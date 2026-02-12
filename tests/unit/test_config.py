@@ -74,3 +74,52 @@ class TestParseDuration:
         assert Config.parse_duration('0d') == timedelta(days=0)
         assert Config.parse_duration('0m') == timedelta(days=0)
         assert Config.parse_duration('0y') == timedelta(days=0)
+
+
+class TestConfigValidation:
+    """Test Config validation and error handling."""
+
+    def test_invalid_port_non_numeric(self, tmp_path, monkeypatch):
+        """Test that non-numeric QBITTORRENT_PORT raises ValueError."""
+        monkeypatch.setenv('QBITTORRENT_HOST', 'localhost')
+        monkeypatch.setenv('QBITTORRENT_PORT', 'abc')
+        monkeypatch.setenv('QBITTORRENT_USERNAME', 'admin')
+        monkeypatch.setenv('QBITTORRENT_PASSWORD', 'admin')
+        monkeypatch.setenv('TORRENT_DIR', str(tmp_path))
+        monkeypatch.setenv('MEDIA_LIBRARY_DIR', str(tmp_path))
+
+        with pytest.raises(ValueError, match="QBITTORRENT_PORT must be an integer"):
+            Config()
+
+    def test_invalid_ratio_non_numeric(self, tmp_path, monkeypatch):
+        """Test that non-numeric MIN_RATIO raises ValueError."""
+        monkeypatch.setenv('QBITTORRENT_HOST', 'localhost')
+        monkeypatch.setenv('QBITTORRENT_USERNAME', 'admin')
+        monkeypatch.setenv('QBITTORRENT_PASSWORD', 'admin')
+        monkeypatch.setenv('TORRENT_DIR', str(tmp_path))
+        monkeypatch.setenv('MEDIA_LIBRARY_DIR', str(tmp_path))
+        monkeypatch.setenv('MIN_RATIO', 'high')
+
+        with pytest.raises(ValueError, match="MIN_RATIO must be a number"):
+            Config()
+
+    def test_missing_required_env_var_message(self, monkeypatch):
+        """Test that missing required var error mentions the key name."""
+        monkeypatch.delenv('QBITTORRENT_HOST', raising=False)
+
+        with pytest.raises(ValueError, match="QBITTORRENT_HOST"):
+            Config()
+
+    def test_data_dir_validation(self, tmp_path, monkeypatch):
+        """Test that unwritable DATA_DIR raises ValueError."""
+        monkeypatch.setenv('QBITTORRENT_HOST', 'localhost')
+        monkeypatch.setenv('QBITTORRENT_USERNAME', 'admin')
+        monkeypatch.setenv('QBITTORRENT_PASSWORD', 'admin')
+        monkeypatch.setenv('TORRENT_DIR', str(tmp_path))
+        monkeypatch.setenv('MEDIA_LIBRARY_DIR', str(tmp_path))
+
+        # Use a path under /proc which can't be created
+        monkeypatch.setenv('DATA_DIR', '/proc/fake_data_dir')
+
+        with pytest.raises(ValueError, match="Cannot create data directory"):
+            Config()

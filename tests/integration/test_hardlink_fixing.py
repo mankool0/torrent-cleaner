@@ -7,7 +7,6 @@ from pathlib import Path
 from unittest.mock import patch
 from src.hardlink_fixer import HardlinkFixer
 from src.file_analyzer import FileAnalyzer
-from src.models import MediaFileInfo
 
 
 def test_single_file_successful_fix(qb_client, torrent_creator, test_dirs):
@@ -132,20 +131,13 @@ def test_multi_file_main_media_fixed(qb_client, torrent_creator, test_dirs):
     hardlink_fixer = HardlinkFixer()
     file_analyzer = FileAnalyzer()
 
-    from src.utils.hash_utils import hash_file
-    media_index = {
-        hash_file(media_file): MediaFileInfo(
-            path=str(media_file),
-            size=os.stat(media_file).st_size,
-            inode=os.stat(media_file).st_ino
-        )
-    }
+    size_index = file_analyzer.build_size_index(test_dirs['media'])
 
     orphaned_files = [str(torrent_data['files']['main'])]
 
     results = hardlink_fixer.fix_orphaned_files(
         orphaned_files,
-        media_index,
+        size_index,
         file_analyzer,
         dry_run=False
     )
@@ -178,20 +170,13 @@ def test_multi_file_only_subtitle_fixed(qb_client, torrent_creator, test_dirs):
     hardlink_fixer = HardlinkFixer()
     file_analyzer = FileAnalyzer()
 
-    from src.utils.hash_utils import hash_file
-    media_index = {
-        hash_file(media_srt): MediaFileInfo(
-            path=str(media_srt),
-            size=os.stat(media_srt).st_size,
-            inode=os.stat(media_srt).st_ino
-        )
-    }
+    size_index = file_analyzer.build_size_index(test_dirs['media'])
 
     orphaned_files = [str(torrent_data['files']['subtitle'])]
 
     results = hardlink_fixer.fix_orphaned_files(
         orphaned_files,
-        media_index,
+        size_index,
         file_analyzer,
         dry_run=False
     )
@@ -223,20 +208,13 @@ def test_multi_file_sample_fixed(qb_client, torrent_creator, test_dirs):
     hardlink_fixer = HardlinkFixer()
     file_analyzer = FileAnalyzer()
 
-    from src.utils.hash_utils import hash_file
-    media_index = {
-        hash_file(media_sample): MediaFileInfo(
-            path=str(media_sample),
-            size=os.stat(media_sample).st_size,
-            inode=os.stat(media_sample).st_ino
-        )
-    }
+    size_index = file_analyzer.build_size_index(test_dirs['media'])
 
     orphaned_files = [str(torrent_data['files']['sample'])]
 
     results = hardlink_fixer.fix_orphaned_files(
         orphaned_files,
-        media_index,
+        size_index,
         file_analyzer,
         dry_run=False
     )

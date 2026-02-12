@@ -16,7 +16,7 @@ from src.discord_notifier import DiscordNotifier
 from src.models import WorkflowStats
 
 
-def run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_cleaner, media_index):
+def run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_cleaner, size_index):
     """
     Run the torrent cleaning workflow.
 
@@ -26,7 +26,7 @@ def run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_clea
         file_analyzer: FileAnalyzer instance
         hardlink_fixer: HardlinkFixer instance
         torrent_cleaner: TorrentCleaner instance
-        media_index: Dict mapping file hashes to MediaFileInfo
+        size_index: Dict mapping file sizes to lists of file paths
 
     Returns:
         WorkflowStats with workflow statistics
@@ -137,8 +137,8 @@ def run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_clea
                 for linked_file in analysis.linked:
                     if not file_analyzer.is_media_file(linked_file):
                         continue
-                    # Check if this file exists in media index
-                    if file_analyzer.find_identical_file(linked_file, media_index):
+                    # Check if this file exists in media library
+                    if file_analyzer.find_identical_file(linked_file, size_index=size_index):
                         media_files_already_linked += 1
 
             if media_files_already_linked > 0:
@@ -158,7 +158,7 @@ def run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_clea
 
                 fix_results = hardlink_fixer.fix_orphaned_files(
                     orphaned_files,
-                    media_index,
+                    size_index,
                     file_analyzer,
                     dry_run=config.dry_run
                 )
@@ -220,21 +220,33 @@ def main():
             logger.warning("Running in DRY RUN mode - no changes will be made")
 
         logger.info("Initializing components...")
+
+        file_cache = None
+        if config.enable_cache:
+            from src.file_cache import FileCache
+            try:
+                file_cache = FileCache(db_path=config.cache_db_path)
+                cache_stats = file_cache.get_stats()
+                logger.info(f"File cache initialized ({cache_stats.total_entries} existing entries)")
+            except Exception as e:
+                logger.warning(f"Failed to initialize file cache: {e}")
+                file_cache = None
+
         qbt_client = QBittorrentClient(
             config.qbt_host,
             config.qbt_port,
             config.qbt_username,
             config.qbt_password
         )
-        file_analyzer = FileAnalyzer()
+        file_analyzer = FileAnalyzer(cache=file_cache)
         hardlink_fixer = HardlinkFixer()
         torrent_cleaner = TorrentCleaner(config, qbt_client)
         discord_notifier = DiscordNotifier(config.discord_webhook_url)
 
-        logger.info("Building media library index...")
-        media_index = file_analyzer.build_media_library_index(config.media_library_dir)
+        logger.info("Building media library size index...")
+        size_index = file_analyzer.build_size_index(config.media_library_dir)
 
-        stats = run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_cleaner, media_index)
+        stats = run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_cleaner, size_index)
 
         qbt_client.close()
 
@@ -256,9 +268,17 @@ def main():
             for torrent_name in stats.deleted_torrents:
                 logger.info(f"  - {torrent_name}")
 
+        if file_cache:
+            cache_stats = file_analyzer.get_cache_stats()
+            logger.info(f"Cache hits: {cache_stats.hits}, misses: {cache_stats.misses}, "
+                       f"hit rate: {cache_stats.hit_rate:.1%}")
+
         logger.info("=" * 80)
 
         discord_notifier.send_summary(stats, config.dry_run)
+
+        if file_cache:
+            file_cache.close()
 
         logger.info("Torrent Cleaner finished successfully")
         return 0

@@ -6,7 +6,7 @@ from pathlib import Path
 import logging
 from typing import Dict, List
 
-from src.models import HardlinkResult, HardlinkBatchResult, HardlinkFixResult, MediaFileInfo
+from src.models import HardlinkResult, HardlinkBatchResult, HardlinkFixResult
 
 
 class HardlinkFixer:
@@ -139,7 +139,7 @@ class HardlinkFixer:
     def fix_orphaned_files(
         self,
         orphaned_files: List[str],
-        media_index: Dict[str, MediaFileInfo],
+        size_index: Dict[int, List[str]],
         file_analyzer,
         dry_run: bool = True
     ) -> HardlinkBatchResult:
@@ -148,7 +148,7 @@ class HardlinkFixer:
 
         Args:
             orphaned_files: List of orphaned file paths
-            media_index: Media library hash index
+            size_index: Size-based media library index (size -> list of paths)
             file_analyzer: FileAnalyzer instance for finding identical files
             dry_run: If True, don't actually fix
 
@@ -176,7 +176,7 @@ class HardlinkFixer:
             attempted += 1
 
             # Find identical file in media library
-            media_file = file_analyzer.find_identical_file(orphaned_file, media_index)
+            media_file = file_analyzer.find_identical_file(orphaned_file, size_index=size_index)
 
             if media_file:
                 self.logger.info(f"  Found match for: {Path(orphaned_file).name}")

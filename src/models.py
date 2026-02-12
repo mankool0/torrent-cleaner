@@ -5,11 +5,18 @@ from typing import List, Optional
 
 
 @dataclass
-class MediaFileInfo:
-    """Information about a media file in the library index."""
-    path: str
-    size: int
-    inode: int
+class FileCacheStats:
+    """Statistics about the persistent file hash cache."""
+    total_entries: int
+    db_size_bytes: int
+
+
+@dataclass
+class CacheStats:
+    """Statistics from file hash cache usage."""
+    hits: int
+    misses: int
+    hit_rate: float
 
 
 @dataclass
