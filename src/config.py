@@ -68,7 +68,7 @@ class Config:
         if not self.media_library_dir.exists():
             raise ValueError(f"Media library directory does not exist: {self.media_library_dir}")
 
-        if not os.access(self.torrent_dir, os.W_OK):
+        if not self.dry_run and not os.access(self.torrent_dir, os.W_OK):
             raise ValueError(f"Torrent directory is not writable: {self.torrent_dir}")
 
         try:
