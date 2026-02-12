@@ -205,11 +205,13 @@ def run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_clea
 
 def main():
     """Main workflow for torrent cleaning."""
-    logger = None
+    # Initialize a basic stderr logger before Config so startup errors are formatted
+    logger = setup_logger('torrent-cleaner', 'INFO')
 
     try:
         config = Config()
 
+        # Reconfigure logger with settings from config (log level + file)
         logger = setup_logger('torrent-cleaner', config.log_level, config.log_file)
         logger.info("=" * 80)
         logger.info("Torrent Cleaner Starting")
@@ -284,17 +286,14 @@ def main():
         return 0
 
     except Exception as e:
-        if logger:
-            logger.exception(f"Fatal error: {e}")
-        else:
-            print(f"Fatal error: {e}", file=sys.stderr)
+        logger.exception(f"Fatal error: {e}")
 
         try:
             config = Config()
             discord_notifier = DiscordNotifier(config.discord_webhook_url)
             discord_notifier.send_error(f"Fatal error: {e}")
         except Exception as discord_error:
-            print(f"Failed to send Discord error notification: {discord_error}", file=sys.stderr)
+            logger.error(f"Failed to send Discord error notification: {discord_error}")
 
         return 1
 
