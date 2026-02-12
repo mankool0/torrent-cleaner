@@ -154,7 +154,7 @@ class FileAnalyzer:
                 file_count += 1
 
                 if file_count % 1000 == 0:
-                    self.logger.debug(f"Indexed {file_count} files...")
+                    self.logger.info(f"Indexed {file_count} files...")
 
             except (OSError, PermissionError) as e:
                 self.logger.error(f"Error indexing file {file_path}: {e}")
