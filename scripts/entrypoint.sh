@@ -33,15 +33,15 @@ DRY_RUN=${DRY_RUN:-true}
 FIX_HARDLINKS=${FIX_HARDLINKS:-true}
 DISCORD_WEBHOOK_URL=${DISCORD_WEBHOOK_URL:-}
 LOG_LEVEL=${LOG_LEVEL:-INFO}
-LOG_FILE=${LOG_FILE:-/var/log/torrent-cleaner/cleaner.log}
+LOG_FILE=${LOG_FILE:-/app/data/torrent-cleaner/logs/cleaner.log}
 
-$CRON_SCHEDULE root /app/scripts/run_cleaner.sh >> /var/log/torrent-cleaner/cron.log 2>&1
+$CRON_SCHEDULE root /app/scripts/run_cleaner.sh >> /app/data/torrent-cleaner/logs/cron.log 2>&1
 EOF
 
 chmod 0644 /etc/cron.d/torrent-cleaner
 
-touch /var/log/torrent-cleaner/cron.log
-touch /var/log/torrent-cleaner/cleaner.log
+touch /app/data/torrent-cleaner/logs/cron.log
+touch /app/data/torrent-cleaner/logs/cleaner.log
 
 echo "Cron job configured successfully"
 echo "Schedule: $CRON_SCHEDULE"
@@ -53,7 +53,7 @@ if [ "${RUN_ON_STARTUP:-false}" = "true" ]; then
 fi
 
 echo "Starting cron daemon..."
-echo "Logs: /var/log/torrent-cleaner/cron.log"
+echo "Logs: /app/data/torrent-cleaner/logs/cron.log"
 echo ""
 
 # Execute the main command (cron -f)

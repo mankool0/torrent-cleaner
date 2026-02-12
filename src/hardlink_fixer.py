@@ -1,4 +1,4 @@
-"""Atomic hardlink repair with rollback capability."""
+"""Hardlink repair with rollback capability."""
 
 import os
 import shutil
