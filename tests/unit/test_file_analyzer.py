@@ -5,7 +5,7 @@ import os
 import tempfile
 from pathlib import Path
 from src.file_analyzer import FileAnalyzer
-from src.utils.hash_utils import hash_file
+from src.models import SizeIndex
 
 
 class TestIsMediaFile:
@@ -192,7 +192,8 @@ class TestFindIdenticalFile:
             media_file.write_bytes(b'Movie content')
 
             size = os.stat(orphaned_file).st_size
-            size_index = {size: [str(media_file)]}
+            size_index = SizeIndex()
+            size_index.add(size, str(media_file))
 
             result = analyzer.find_identical_file(str(orphaned_file), size_index=size_index)
 
@@ -212,7 +213,8 @@ class TestFindIdenticalFile:
             media_file.write_bytes(b'Content BBBB')
 
             size = os.stat(orphaned_file).st_size
-            size_index = {size: [str(media_file)]}
+            size_index = SizeIndex()
+            size_index.add(size, str(media_file))
 
             result = analyzer.find_identical_file(str(orphaned_file), size_index=size_index)
 
@@ -232,7 +234,8 @@ class TestFindIdenticalFile:
             media_file.write_bytes(b'Much longer content here')
 
             media_size = os.stat(media_file).st_size
-            size_index = {media_size: [str(media_file)]}
+            size_index = SizeIndex()
+            size_index.add(media_size, str(media_file))
 
             result = analyzer.find_identical_file(str(orphaned_file), size_index=size_index)
 

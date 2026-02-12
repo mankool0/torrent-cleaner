@@ -1,7 +1,38 @@
 """Data models for torrent cleaner application."""
 
-from dataclasses import dataclass
-from typing import List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, List, Optional, ValuesView
+
+
+@dataclass
+class SizeIndex:
+    """Index mapping file sizes to lists of file paths."""
+    _entries: Dict[int, List[str]] = field(default_factory=dict)
+
+    def add(self, size: int, path: str) -> None:
+        self._entries.setdefault(size, []).append(path)
+
+    def get_candidates(self, size: int) -> List[str]:
+        return self._entries.get(size, [])
+
+    def __len__(self) -> int:
+        return len(self._entries)
+
+    def __contains__(self, size: int) -> bool:
+        return size in self._entries
+
+    def __getitem__(self, size: int) -> List[str]:
+        return self._entries[size]
+
+    def __bool__(self) -> bool:
+        return bool(self._entries)
+
+    @property
+    def file_count(self) -> int:
+        return sum(len(paths) for paths in self._entries.values())
+
+    def values(self) -> ValuesView:
+        return self._entries.values()
 
 
 @dataclass

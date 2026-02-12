@@ -4,9 +4,9 @@ import os
 import shutil
 from pathlib import Path
 import logging
-from typing import Dict, List
+from typing import List
 
-from src.models import HardlinkResult, HardlinkBatchResult, HardlinkFixResult
+from src.models import HardlinkResult, HardlinkBatchResult, HardlinkFixResult, SizeIndex
 
 
 class HardlinkFixer:
@@ -139,7 +139,7 @@ class HardlinkFixer:
     def fix_orphaned_files(
         self,
         orphaned_files: List[str],
-        size_index: Dict[int, List[str]],
+        size_index: SizeIndex,
         file_analyzer,
         dry_run: bool = True
     ) -> HardlinkBatchResult:

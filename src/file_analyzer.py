@@ -2,11 +2,11 @@
 
 import os
 from pathlib import Path
-from typing import Dict, List, Optional, Set
+from typing import List, Optional, Set
 import logging
 
 from src.utils.hash_utils import hash_file
-from src.models import CacheStats, OrphanDetectionResult, OrphanDetectionStats
+from src.models import CacheStats, OrphanDetectionResult, OrphanDetectionStats, SizeIndex
 
 
 class FileAnalyzer:
@@ -25,7 +25,7 @@ class FileAnalyzer:
         self.cache = cache
         self._cache_hits = 0
         self._cache_misses = 0
-        self._size_index: Dict[int, List[str]] = {}
+        self._size_index: SizeIndex = SizeIndex()
 
     def _hash_file_with_cache(self, file_path: str) -> str:
         """Hash a file, using cache if available.
@@ -120,7 +120,7 @@ class FileAnalyzer:
             stats=stats
         )
 
-    def build_size_index(self, media_dir: Path, extensions: Set[str] | None = None) -> Dict[int, List[str]]:
+    def build_size_index(self, media_dir: Path, extensions: Set[str] | None = None) -> SizeIndex:
         """
         Build size-based index of all files in media library.
 
@@ -130,14 +130,14 @@ class FileAnalyzer:
                        If None, indexes all files.
 
         Returns:
-            Dictionary mapping file size to list of file paths
+            SizeIndex mapping file sizes to lists of file paths
         """
         self.logger.info(f"Building media library size index for: {media_dir}")
 
         if not media_dir.exists():
             raise ValueError(f"Media directory does not exist: {media_dir}")
 
-        size_index: Dict[int, List[str]] = {}
+        size_index = SizeIndex()
         file_count = 0
         error_count = 0
 
@@ -150,7 +150,7 @@ class FileAnalyzer:
 
             try:
                 size = os.stat(file_path).st_size
-                size_index.setdefault(size, []).append(str(file_path))
+                size_index.add(size, str(file_path))
                 file_count += 1
 
                 if file_count % 1000 == 0:
@@ -167,7 +167,7 @@ class FileAnalyzer:
     def find_identical_file(
         self,
         orphaned_file: str,
-        size_index: Dict[int, List[str]] | None = None,
+        size_index: SizeIndex | None = None,
     ) -> Optional[str]:
         """
         Find identical file in media library using candidate-based matching.
@@ -177,7 +177,7 @@ class FileAnalyzer:
 
         Args:
             orphaned_file: Path to orphaned file
-            size_index: Optional size-based index (uses self._size_index if not provided)
+            size_index: Optional SizeIndex (uses self._size_index if not provided)
 
         Returns:
             Path to identical file in media library, or None if not found
@@ -193,7 +193,7 @@ class FileAnalyzer:
             self.logger.error(f"Cannot stat orphaned file {orphaned_file}: {e}")
             return None
 
-        candidates = effective_size_index.get(orphaned_size)
+        candidates = effective_size_index.get_candidates(orphaned_size)
         if not candidates:
             return None
 

@@ -26,7 +26,7 @@ def run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_clea
         file_analyzer: FileAnalyzer instance
         hardlink_fixer: HardlinkFixer instance
         torrent_cleaner: TorrentCleaner instance
-        size_index: Dict mapping file sizes to lists of file paths
+        size_index: SizeIndex mapping file sizes to lists of file paths
 
     Returns:
         WorkflowStats with workflow statistics
