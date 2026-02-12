@@ -159,6 +159,7 @@ class HardlinkFixer:
         fixed = 0
         failed = 0
         media_files_fixed = 0
+        bytes_saved = 0
         results = []
 
         if not orphaned_files:
@@ -167,6 +168,7 @@ class HardlinkFixer:
                 fixed=0,
                 failed=0,
                 media_files_fixed=0,
+                bytes_saved=0,
                 results=[]
             )
 
@@ -186,6 +188,10 @@ class HardlinkFixer:
 
                 if result.success:
                     fixed += 1
+                    try:
+                        bytes_saved += os.stat(orphaned_file).st_size
+                    except OSError:
+                        pass
 
                     # Check if this is a media file
                     if file_analyzer.is_media_file(orphaned_file):
@@ -210,5 +216,6 @@ class HardlinkFixer:
             fixed=fixed,
             failed=failed,
             media_files_fixed=media_files_fixed,
+            bytes_saved=bytes_saved,
             results=results
         )

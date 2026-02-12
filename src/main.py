@@ -233,6 +233,7 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
                 stats.hardlinks_attempted += fix_results.attempted
                 stats.hardlinks_fixed += fix_results.fixed
                 stats.hardlinks_failed += fix_results.failed
+                stats.space_saved_hardlinks_bytes += fix_results.bytes_saved
                 media_files_fixed = fix_results.media_files_fixed
 
                 # Resume torrent after fixing
@@ -335,10 +336,12 @@ def main() -> int:
 
         space_dead = stats.space_freed_dead_tracker_bytes / (1024**3)
         space_criteria = stats.space_freed_criteria_bytes / (1024**3)
-        space_total = (stats.space_freed_dead_tracker_bytes + stats.space_freed_criteria_bytes) / (1024**3)
+        space_hardlinks = stats.space_saved_hardlinks_bytes / (1024**3)
+        space_total = (stats.space_freed_dead_tracker_bytes + stats.space_freed_criteria_bytes + stats.space_saved_hardlinks_bytes) / (1024**3)
         logger.info(f"Space freed (dead trackers): {space_dead:.2f} GB")
         logger.info(f"Space freed (criteria):      {space_criteria:.2f} GB")
-        logger.info(f"Space freed (total):         {space_total:.2f} GB")
+        logger.info(f"Space saved (hardlinks):     {space_hardlinks:.2f} GB")
+        logger.info(f"Space saved (total):         {space_total:.2f} GB")
 
         if stats.deleted_torrents:
             logger.info(f"\nDeleted torrents:")
