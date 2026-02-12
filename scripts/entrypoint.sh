@@ -40,6 +40,7 @@ EOF
 
 chmod 0644 /etc/cron.d/torrent-cleaner
 
+mkdir -p /app/data/torrent-cleaner/logs /app/data/torrent-cleaner/cache
 touch /app/data/torrent-cleaner/logs/cron.log
 touch /app/data/torrent-cleaner/logs/cleaner.log
 
