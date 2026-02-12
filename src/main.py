@@ -364,9 +364,9 @@ def main() -> int:
         logger.exception(f"Fatal error: {e}")
 
         try:
-            config = Config()
-            discord_notifier = DiscordNotifier(config.discord_webhook_url)
-            discord_notifier.send_error(f"Fatal error: {e}")
+            webhook_url = os.getenv('DISCORD_WEBHOOK_URL', '')
+            if webhook_url:
+                DiscordNotifier(webhook_url).send_error(f"Fatal error: {e}")
         except Exception as discord_error:
             logger.error(f"Failed to send Discord error notification: {discord_error}")
 
