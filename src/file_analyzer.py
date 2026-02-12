@@ -141,24 +141,23 @@ class FileAnalyzer:
         file_count = 0
         error_count = 0
 
-        for file_path in media_dir.rglob('*'):
-            if not file_path.is_file():
-                continue
+        for dirpath, _dirnames, filenames in os.walk(media_dir):
+            for filename in filenames:
+                if extensions and os.path.splitext(filename)[1].lower() not in extensions:
+                    continue
 
-            if extensions and file_path.suffix.lower() not in extensions:
-                continue
+                file_path = os.path.join(dirpath, filename)
+                try:
+                    size = os.stat(file_path).st_size
+                    size_index.add(size, file_path)
+                    file_count += 1
 
-            try:
-                size = os.stat(file_path).st_size
-                size_index.add(size, str(file_path))
-                file_count += 1
+                    if file_count % 1000 == 0:
+                        self.logger.info(f"Indexed {file_count} files...")
 
-                if file_count % 1000 == 0:
-                    self.logger.info(f"Indexed {file_count} files...")
-
-            except (OSError, PermissionError) as e:
-                self.logger.error(f"Error indexing file {file_path}: {e}")
-                error_count += 1
+                except (OSError, PermissionError) as e:
+                    self.logger.error(f"Error indexing file {file_path}: {e}")
+                    error_count += 1
 
         self.logger.info(f"Size index built: {file_count} files indexed, {error_count} errors")
         self._size_index = size_index
@@ -188,19 +187,31 @@ class FileAnalyzer:
             return None
 
         try:
-            orphaned_size = os.stat(orphaned_file).st_size
+            file_stat = os.stat(orphaned_file)
+            file_size = file_stat.st_size
+            file_inode = file_stat.st_ino
         except OSError as e:
-            self.logger.error(f"Cannot stat orphaned file {orphaned_file}: {e}")
+            self.logger.error(f"Cannot stat file {orphaned_file}: {e}")
             return None
 
-        candidates = effective_size_index.get_candidates(orphaned_size)
+        candidates = effective_size_index.get_candidates(file_size)
         if not candidates:
             return None
 
+        # Fast path: check if any candidate shares the same inode (hardlinked)
+        for candidate in candidates:
+            try:
+                if os.stat(candidate).st_ino == file_inode:
+                    self.logger.debug(f"Found hardlinked file for {orphaned_file}: {candidate}")
+                    return candidate
+            except OSError:
+                continue
+
+        # Slow path: hash to find identical content
         try:
-            orphaned_hash = self._hash_file_with_cache(str(orphaned_file))
+            file_hash = self._hash_file_with_cache(str(orphaned_file))
         except Exception as e:
-            self.logger.error(f"Error hashing orphaned file {orphaned_file}: {e}")
+            self.logger.error(f"Error hashing file {orphaned_file}: {e}")
             return None
 
         for candidate in candidates:
@@ -208,7 +219,7 @@ class FileAnalyzer:
                 if not Path(candidate).exists():
                     continue
                 candidate_hash = self._hash_file_with_cache(candidate)
-                if candidate_hash == orphaned_hash:
+                if candidate_hash == file_hash:
                     self.logger.debug(f"Found identical file for {orphaned_file}: {candidate}")
                     return candidate
             except Exception as e:
