@@ -17,7 +17,7 @@ def setup_logger(name: str, log_level: str = "INFO", log_file: str | None = None
     Returns:
         Configured logger instance
     """
-    logger = logging.getLogger(name)
+    logger = logging.getLogger()
     logger.setLevel(getattr(logging, log_level.upper()))
 
     logger.handlers.clear()
