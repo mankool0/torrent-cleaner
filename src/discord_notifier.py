@@ -147,17 +147,6 @@ class DiscordNotifier:
                 'inline': True
             })
 
-        if summary.deletion_reasons:
-            reasons_text = '\n'.join([
-                f"• {reason}: {count}"
-                for reason, count in summary.deletion_reasons.items()
-            ])
-            fields.append({
-                'name': 'Deletion Reasons',
-                'value': reasons_text,
-                'inline': False
-            })
-
         if summary.deleted_torrents:
             torrents_list = summary.deleted_torrents[:5]
             torrents_text = '\n'.join([f"• {t}" for t in torrents_list])
