@@ -3,6 +3,7 @@
 import pytest
 from tests.helpers import get_torrent_by_hash, assert_torrent_metadata
 from src.config import Config
+from src.models import DeletionRule
 from src.qbittorrent_client import QBittorrentClient
 from src.torrent_cleaner import TorrentCleaner
 
@@ -19,8 +20,7 @@ def torrent_cleaner(test_dirs):
     os.environ['DATA_DIR'] = str(test_dirs['root'] / 'data')
 
     config = Config()
-    config.min_seeding_duration = '30d'
-    config.min_ratio = 2.0
+    config.deletion_rules = [DeletionRule(min_duration='30d', min_ratio=2.0)]
     config.dry_run = False
 
     client = QBittorrentClient(

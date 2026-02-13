@@ -5,8 +5,8 @@ import logging
 import qbittorrentapi
 
 from src.config import Config
+from src.models import DeletionDecision, DeletionRule, TorrentStats
 from src.qbittorrent_client import QBittorrentClient
-from src.models import DeletionDecision, TorrentStats
 
 
 class TorrentCleaner:
@@ -28,11 +28,10 @@ class TorrentCleaner:
                               override_seeding_time: int = None,
                               override_ratio: float = None) -> DeletionDecision:
         """
-        Check if torrent meets deletion criteria.
+        Check if torrent meets any deletion rule.
 
-        Both criteria must be met (AND logic):
-        - Age >= min_seeding_duration
-        - Ratio >= min_ratio
+        Rules use OR logic between them: if any rule fully passes, the torrent should be deleted.
+        Within each rule, conditions use AND logic: all conditions in the rule must be met.
 
         Args:
             torrent: Torrent dictionary from qBittorrent
@@ -42,9 +41,6 @@ class TorrentCleaner:
         Returns:
             DeletionDecision with should_delete flag, reasons, and stats
         """
-        reasons = []
-        should_delete = True
-
         ratio = override_ratio if override_ratio is not None else torrent.ratio
         seeding_time = override_seeding_time if override_seeding_time is not None else torrent.seeding_time
 
@@ -62,22 +58,35 @@ class TorrentCleaner:
             )
 
         age = timedelta(seconds=seeding_time)
-        min_duration = self.config.parse_duration(self.config.min_seeding_duration)
-        if age < min_duration:
-            should_delete = False
-            reasons.append(
-                f"Age {self._format_timedelta(age)} < minimum {self.config.min_seeding_duration}"
-            )
-        else:
-            reasons.append(
-                f"Age {self._format_timedelta(age)} >= minimum {self.config.min_seeding_duration}"
-            )
+        reasons = []
+        should_delete = False
 
-        if ratio < self.config.min_ratio:
-            should_delete = False
-            reasons.append(f"Ratio {ratio:.2f} < minimum {self.config.min_ratio}")
-        else:
-            reasons.append(f"Ratio {ratio:.2f} >= minimum {self.config.min_ratio}")
+        for rule in self.config.deletion_rules:
+            rule_passed = True
+            rule_reasons = []
+
+            if rule.min_duration is not None:
+                min_duration = self.config.parse_duration(rule.min_duration)
+                if age < min_duration:
+                    rule_passed = False
+                    rule_reasons.append(f"age {self._format_timedelta(age)} < {rule.min_duration}")
+                else:
+                    rule_reasons.append(f"age {self._format_timedelta(age)} >= {rule.min_duration}")
+
+            if rule.min_ratio is not None:
+                if ratio < rule.min_ratio:
+                    rule_passed = False
+                    rule_reasons.append(f"ratio {ratio:.2f} < {rule.min_ratio}")
+                else:
+                    rule_reasons.append(f"ratio {ratio:.2f} >= {rule.min_ratio}")
+
+            rule_label = self._format_rule(rule)
+            if rule_passed:
+                reasons.append(f"Rule [{rule_label}]: PASS ({', '.join(rule_reasons)})")
+                should_delete = True
+                break
+            else:
+                reasons.append(f"Rule [{rule_label}]: FAIL ({', '.join(rule_reasons)})")
 
         return DeletionDecision(
             should_delete=should_delete,
@@ -89,6 +98,16 @@ class TorrentCleaner:
                 age_days=age.days
             )
         )
+
+    @staticmethod
+    def _format_rule(rule: DeletionRule) -> str:
+        """Format a deletion rule for display in reason strings."""
+        parts = []
+        if rule.min_duration is not None:
+            parts.append(rule.min_duration)
+        if rule.min_ratio is not None:
+            parts.append(str(rule.min_ratio))
+        return ' AND '.join(parts)
 
     def delete_torrent(self, torrent_hash: str, torrent_name: str, delete_files: bool = True) -> bool:
         """

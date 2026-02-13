@@ -3,7 +3,9 @@
 import os
 from pathlib import Path
 from datetime import timedelta
+from typing import List
 from dotenv import load_dotenv
+from src.models import DeletionRule
 
 
 class Config:
@@ -24,12 +26,9 @@ class Config:
         self.torrent_dir = Path(os.getenv('TORRENT_DIR', '/data/torrents'))
         self.media_library_dir = Path(os.getenv('MEDIA_LIBRARY_DIR', '/data/media'))
 
-        self.min_seeding_duration = os.getenv('MIN_SEEDING_DURATION', '30d')
-        try:
-            self.min_ratio = float(os.getenv('MIN_RATIO', '2.0'))
-        except ValueError:
-            raise ValueError(f"MIN_RATIO must be a number, got: '{os.getenv('MIN_RATIO')}'")
-
+        self.deletion_rules = self._parse_deletion_criteria(
+            os.getenv('DELETION_CRITERIA', '30d 2.0')
+        )
 
         self.dry_run = os.getenv('DRY_RUN', 'true').lower() in ('true', '1', 'yes')
         self.fix_hardlinks = os.getenv('FIX_HARDLINKS', 'true').lower() in ('true', '1', 'yes')
@@ -60,6 +59,61 @@ class Config:
             raise ValueError(f"Required environment variable not set: {key}")
         return value
 
+    @staticmethod
+    def _parse_deletion_criteria(raw: str) -> List[DeletionRule]:
+        """Parse DELETION_CRITERIA string into a list of DeletionRule objects.
+
+        Format: rules separated by | (OR logic), tokens within a rule separated by space (AND logic).
+        Duration tokens end with d/m/y (e.g. 30d, 3m, 1y). Ratio tokens are plain numbers (e.g. 2.0).
+
+        Raises:
+            ValueError: On empty input, empty rules, invalid tokens, or duplicate duration/ratio in a rule.
+        """
+        if not raw or not raw.strip():
+            raise ValueError("DELETION_CRITERIA cannot be empty")
+
+        rules = []
+        for rule_str in raw.split('|'):
+            rule_str = rule_str.strip()
+            if not rule_str:
+                raise ValueError("DELETION_CRITERIA contains an empty rule (double pipe or trailing pipe)")
+
+            tokens = rule_str.split()
+            rule = DeletionRule()
+
+            for token in tokens:
+                token_lower = token.strip().lower()
+                if not token_lower:
+                    continue
+
+                # Check if it's a duration (ends with d/m/y)
+                if token_lower[-1] in ('d', 'm', 'y'):
+                    if rule.min_duration is not None:
+                        raise ValueError(f"Duplicate duration in rule '{rule_str}': already have '{rule.min_duration}', got '{token}'")
+                    Config.parse_duration(token)
+                    rule.min_duration = token.strip()
+                else:
+                    # Must be a ratio
+                    try:
+                        ratio = float(token)
+                    except ValueError:
+                        raise ValueError(f"Invalid token in DELETION_CRITERIA: '{token}' (expected duration like 30d or number like 2.0)")
+                    if ratio < 0:
+                        raise ValueError(f"Ratio must be >= 0, got: {ratio}")
+                    if rule.min_ratio is not None:
+                        raise ValueError(f"Duplicate ratio in rule '{rule_str}': already have '{rule.min_ratio}', got '{token}'")
+                    rule.min_ratio = ratio
+
+            if rule.min_duration is None and rule.min_ratio is None:
+                raise ValueError(f"Rule '{rule_str}' has no valid conditions")
+
+            rules.append(rule)
+
+        if not rules:
+            raise ValueError("DELETION_CRITERIA must contain at least one rule")
+
+        return rules
+
     def _validate(self):
         """Validate configuration values."""
         if not self.torrent_dir.exists():
@@ -84,14 +138,6 @@ class Config:
                 cache_parent.mkdir(parents=True, exist_ok=True)
             except OSError as e:
                 raise ValueError(f"Cannot create cache directory {cache_parent}: {e}")
-
-        if self.min_ratio < 0:
-            raise ValueError(f"MIN_RATIO must be >= 0, got: {self.min_ratio}")
-
-        try:
-            self.parse_duration(self.min_seeding_duration)
-        except ValueError as e:
-            raise ValueError(f"Invalid MIN_SEEDING_DURATION format: {e}")
 
     @staticmethod
     def parse_duration(duration_str: str) -> timedelta:
@@ -134,6 +180,19 @@ class Config:
 
         return timedelta(days=days)
 
+    @staticmethod
+    def format_deletion_rules(rules: List[DeletionRule]) -> str:
+        """Format deletion rules for display."""
+        parts = []
+        for rule in rules:
+            tokens = []
+            if rule.min_duration is not None:
+                tokens.append(rule.min_duration)
+            if rule.min_ratio is not None:
+                tokens.append(str(rule.min_ratio))
+            parts.append(' '.join(tokens))
+        return ' | '.join(parts)
+
     def __str__(self) -> str:
         """Return string representation of config."""
         return (
@@ -141,8 +200,7 @@ class Config:
             f"  qbt_host={self.qbt_host}:{self.qbt_port}\n"
             f"  torrent_dir={self.torrent_dir}\n"
             f"  media_library_dir={self.media_library_dir}\n"
-            f"  min_seeding_duration={self.min_seeding_duration}\n"
-            f"  min_ratio={self.min_ratio}\n"
+            f"  deletion_rules={self.format_deletion_rules(self.deletion_rules)}\n"
             f"  dry_run={self.dry_run}\n"
             f"  fix_hardlinks={self.fix_hardlinks}\n"
             f"  enable_cache={self.enable_cache}\n"

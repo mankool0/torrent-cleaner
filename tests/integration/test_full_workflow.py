@@ -6,6 +6,7 @@ from pathlib import Path
 from src.config import Config
 from src.file_analyzer import FileAnalyzer
 from src.hardlink_fixer import HardlinkFixer
+from src.models import DeletionRule
 from src.torrent_cleaner import TorrentCleaner
 from src.main import run_workflow
 
@@ -24,8 +25,7 @@ def cleaner_config(test_dirs):
 
     config = Config()
     config.media_paths = [str(test_dirs['media'])]
-    config.min_seeding_duration = '30d'
-    config.min_ratio = 2.0
+    config.deletion_rules = [DeletionRule(min_duration='30d', min_ratio=2.0)]
     config.dry_run = False
     return config
 

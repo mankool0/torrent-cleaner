@@ -25,8 +25,7 @@ Copy `.env.example` and configure:
 | `TORRENT_DIR` | `/data/torrents` | Torrent data path (inside container) |
 | `MEDIA_LIBRARY_DIR` | `/data/media` | Media library path (inside container) |
 | `DATA_DIR` | `/app/data/torrent-cleaner` | Cache and logs directory |
-| `MIN_SEEDING_DURATION` | `30d` | Min seeding time (`30d`, `3m`, `1y`) |
-| `MIN_RATIO` | `2.0` | Min seeding ratio |
+| `DELETION_CRITERIA` | `30d 2.0` | Deletion rules (see below) |
 | `DRY_RUN` | `true` | Set `false` to actually delete |
 | `FIX_HARDLINKS` | `true` | Fix broken hardlinks before deleting |
 | `ENABLE_CACHE` | `true` | Cache file hashes in SQLite |
@@ -56,9 +55,21 @@ The container paths must match what qBittorrent sees (i.e. the same mount struct
 
 ### Deletion Criteria
 
-A torrent is eligible for deletion when **both** conditions are met:
-- Seeding time >= `MIN_SEEDING_DURATION`
-- Ratio >= `MIN_RATIO`
+`DELETION_CRITERIA` defines one or more rules. Rules are separated by `|` (OR logic). Within each rule, conditions are separated by spaces (AND logic). Duration uses `d`/`m`/`y` suffixes; ratio is a plain number.
+
+```
+# Single rule (default): delete when 30 days AND ratio >= 2.0
+DELETION_CRITERIA=30d 2.0
+
+# Multiple rules: (30d AND 2.0) OR (10d AND 0.5)
+DELETION_CRITERIA=30d 2.0 | 10d 0.5
+
+# Mixed: (30d AND 2.0) OR 90 days regardless of ratio
+DELETION_CRITERIA=30d 2.0 | 90d
+
+# Ratio only: delete when ratio >= 0.5
+DELETION_CRITERIA=0.5
+```
 
 Even then, torrents are kept if their media files are hardlinked to the media library (or can be fixed). When multiple torrents share files via hardlinks, their stats are aggregated (max seeding time, summed ratio).
 

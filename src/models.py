@@ -5,6 +5,13 @@ from typing import Dict, List, Optional, ValuesView
 
 
 @dataclass
+class DeletionRule:
+    """A single deletion rule with optional duration and ratio thresholds."""
+    min_duration: Optional[str] = None   # raw string like "30d"
+    min_ratio: Optional[float] = None
+
+
+@dataclass
 class SizeIndex:
     """Index mapping file sizes to lists of file paths."""
     _entries: Dict[int, List[str]] = field(default_factory=dict)

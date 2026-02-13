@@ -4,6 +4,7 @@ import pytest
 import os
 from datetime import timedelta
 from src.config import Config
+from src.models import DeletionRule
 
 
 class TestParseDuration:
@@ -76,6 +77,109 @@ class TestParseDuration:
         assert Config.parse_duration('0y') == timedelta(days=0)
 
 
+class TestParseDeletionCriteria:
+    """Test Config._parse_deletion_criteria() method."""
+
+    def test_single_rule_both_conditions(self):
+        """Test single rule with both duration and ratio."""
+        rules = Config._parse_deletion_criteria('30d 2.0')
+        assert len(rules) == 1
+        assert rules[0].min_duration == '30d'
+        assert rules[0].min_ratio == 2.0
+
+    def test_single_rule_duration_only(self):
+        """Test single rule with duration only."""
+        rules = Config._parse_deletion_criteria('90d')
+        assert len(rules) == 1
+        assert rules[0].min_duration == '90d'
+        assert rules[0].min_ratio is None
+
+    def test_single_rule_ratio_only(self):
+        """Test single rule with ratio only."""
+        rules = Config._parse_deletion_criteria('0.5')
+        assert len(rules) == 1
+        assert rules[0].min_duration is None
+        assert rules[0].min_ratio == 0.5
+
+    def test_multiple_rules(self):
+        """Test multiple rules separated by pipe."""
+        rules = Config._parse_deletion_criteria('30d 2.0 | 10d 0.5 | 90d')
+        assert len(rules) == 3
+        assert rules[0] == DeletionRule(min_duration='30d', min_ratio=2.0)
+        assert rules[1] == DeletionRule(min_duration='10d', min_ratio=0.5)
+        assert rules[2] == DeletionRule(min_duration='90d', min_ratio=None)
+
+    def test_whitespace_handling(self):
+        """Test that extra whitespace is handled correctly."""
+        rules = Config._parse_deletion_criteria('  30d   2.0  |  10d  ')
+        assert len(rules) == 2
+        assert rules[0].min_duration == '30d'
+        assert rules[0].min_ratio == 2.0
+        assert rules[1].min_duration == '10d'
+
+    def test_ratio_order_independent(self):
+        """Test that ratio can come before duration."""
+        rules = Config._parse_deletion_criteria('2.0 30d')
+        assert len(rules) == 1
+        assert rules[0].min_duration == '30d'
+        assert rules[0].min_ratio == 2.0
+
+    def test_months_and_years(self):
+        """Test duration with months and years."""
+        rules = Config._parse_deletion_criteria('3m 1.0 | 1y')
+        assert len(rules) == 2
+        assert rules[0].min_duration == '3m'
+        assert rules[0].min_ratio == 1.0
+        assert rules[1].min_duration == '1y'
+
+    def test_invalid_token_raises(self):
+        """Test that an invalid token raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid token"):
+            Config._parse_deletion_criteria('30d abc')
+
+    def test_empty_string_raises(self):
+        """Test that empty string raises ValueError."""
+        with pytest.raises(ValueError, match="DELETION_CRITERIA cannot be empty"):
+            Config._parse_deletion_criteria('')
+        with pytest.raises(ValueError, match="DELETION_CRITERIA cannot be empty"):
+            Config._parse_deletion_criteria('   ')
+
+    def test_empty_rule_raises(self):
+        """Test that empty rule (double pipe) raises ValueError."""
+        with pytest.raises(ValueError, match="empty rule"):
+            Config._parse_deletion_criteria('30d 2.0 | | 10d')
+
+    def test_trailing_pipe_raises(self):
+        """Test that trailing pipe raises ValueError."""
+        with pytest.raises(ValueError, match="empty rule"):
+            Config._parse_deletion_criteria('30d 2.0 |')
+
+    def test_duplicate_duration_raises(self):
+        """Test that duplicate duration in one rule raises ValueError."""
+        with pytest.raises(ValueError, match="Duplicate duration"):
+            Config._parse_deletion_criteria('30d 10d')
+
+    def test_duplicate_ratio_raises(self):
+        """Test that duplicate ratio in one rule raises ValueError."""
+        with pytest.raises(ValueError, match="Duplicate ratio"):
+            Config._parse_deletion_criteria('2.0 0.5')
+
+    def test_negative_ratio_raises(self):
+        """Test that negative ratio raises ValueError."""
+        with pytest.raises(ValueError, match="Ratio must be >= 0"):
+            Config._parse_deletion_criteria('-1.0')
+
+    def test_invalid_duration_raises(self):
+        """Test that invalid duration format raises ValueError."""
+        with pytest.raises(ValueError, match="Invalid duration value"):
+            Config._parse_deletion_criteria('abcd')
+
+    def test_zero_ratio(self):
+        """Test that zero ratio is allowed."""
+        rules = Config._parse_deletion_criteria('30d 0.0')
+        assert rules[0].min_ratio == 0.0
+
+
 class TestConfigValidation:
     """Test Config validation and error handling."""
 
@@ -91,16 +195,16 @@ class TestConfigValidation:
         with pytest.raises(ValueError, match="QBITTORRENT_PORT must be an integer"):
             Config()
 
-    def test_invalid_ratio_non_numeric(self, tmp_path, monkeypatch):
-        """Test that non-numeric MIN_RATIO raises ValueError."""
+    def test_invalid_deletion_criteria(self, tmp_path, monkeypatch):
+        """Test that invalid DELETION_CRITERIA raises ValueError."""
         monkeypatch.setenv('QBITTORRENT_HOST', 'localhost')
         monkeypatch.setenv('QBITTORRENT_USERNAME', 'admin')
         monkeypatch.setenv('QBITTORRENT_PASSWORD', 'admin')
         monkeypatch.setenv('TORRENT_DIR', str(tmp_path))
         monkeypatch.setenv('MEDIA_LIBRARY_DIR', str(tmp_path))
-        monkeypatch.setenv('MIN_RATIO', 'high')
+        monkeypatch.setenv('DELETION_CRITERIA', 'garbage')
 
-        with pytest.raises(ValueError, match="MIN_RATIO must be a number"):
+        with pytest.raises(ValueError, match="Invalid token"):
             Config()
 
     def test_missing_required_env_var_message(self, monkeypatch):
