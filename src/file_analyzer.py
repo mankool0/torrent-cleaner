@@ -15,14 +15,17 @@ class FileAnalyzer:
     # Media file extensions to prioritize
     MEDIA_EXTENSIONS = {'.mkv', '.mp4', '.avi', '.mov', '.m4v', '.wmv', '.flv', '.webm', '.ts', '.m2ts'}
 
-    def __init__(self, cache=None):
+    def __init__(self, cache=None, media_extensions: Set[str] = None):
         """Initialize file analyzer.
 
         Args:
             cache: Optional FileCache instance for caching file hashes.
+            media_extensions: Optional set of file extensions to treat as media.
+                            If None, uses the class constant MEDIA_EXTENSIONS.
         """
         self.logger = logging.getLogger(__name__)
         self.cache = cache
+        self.media_extensions = media_extensions if media_extensions is not None else self.MEDIA_EXTENSIONS
         self._cache_hits = 0
         self._cache_misses = 0
         self._size_index: SizeIndex = SizeIndex()
@@ -248,4 +251,4 @@ class FileAnalyzer:
         Returns:
             True if file is a media file
         """
-        return Path(file_path).suffix.lower() in self.MEDIA_EXTENSIONS
+        return Path(file_path).suffix.lower() in self.media_extensions

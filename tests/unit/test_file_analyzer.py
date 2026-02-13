@@ -53,6 +53,14 @@ class TestIsMediaFile:
         assert analyzer.is_media_file('/path/to/file') == False
         assert analyzer.is_media_file('movie') == False
 
+    def test_custom_extensions(self):
+        """Test custom media extensions passed via constructor."""
+        analyzer = FileAnalyzer(media_extensions={'.mkv', '.srt'})
+
+        assert analyzer.is_media_file('/path/to/movie.mkv') == True
+        assert analyzer.is_media_file('/path/to/subtitle.srt') == True
+        assert analyzer.is_media_file('/path/to/movie.mp4') == False
+
 
 class TestBuildSizeIndex:
     """Test build_size_index() method."""

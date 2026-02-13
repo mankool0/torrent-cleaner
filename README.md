@@ -28,6 +28,7 @@ Copy `.env.example` and configure:
 | `DELETION_CRITERIA` | `30d 2.0` | Deletion rules (see below) |
 | `DRY_RUN` | `true` | Set `false` to actually delete |
 | `FIX_HARDLINKS` | `true` | Fix broken hardlinks before deleting |
+| `MEDIA_EXTENSIONS` | `.mkv,.mp4,.avi,...` | Comma-separated media file extensions |
 | `ENABLE_CACHE` | `true` | Cache file hashes in SQLite |
 | `CACHE_DB_PATH` | `{DATA_DIR}/cache/file_cache.db` | Cache database path |
 | `DELETE_DEAD_TRACKERS` | `false` | Delete torrents with dead trackers |
@@ -72,6 +73,15 @@ DELETION_CRITERIA=0.5
 ```
 
 Even then, torrents are kept if their media files are hardlinked to the media library (or can be fixed). When multiple torrents share files via hardlinks, their stats are aggregated (max seeding time, summed ratio).
+
+### Media Extensions
+
+`MEDIA_EXTENSIONS` controls which file extensions count as "media" for keep/delete decisions. Only media files are considered when deciding whether a torrent's files are linked to the media library. Hardlink fixing still runs on **all** orphaned files regardless of extension.
+
+```
+# Default
+MEDIA_EXTENSIONS=.mkv,.mp4,.avi,.mov,.m4v,.wmv,.flv,.webm,.ts,.m2ts
+```
 
 ### Dead Tracker Cleanup
 

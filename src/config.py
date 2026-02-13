@@ -3,7 +3,7 @@
 import os
 from pathlib import Path
 from datetime import timedelta
-from typing import List
+from typing import List, Set
 from dotenv import load_dotenv
 from src.models import DeletionRule
 
@@ -47,10 +47,29 @@ class Config:
         dead_msg_raw = os.getenv('DEAD_TRACKER_MESSAGES', '')
         self.dead_tracker_messages = [m.strip() for m in dead_msg_raw.split('|') if m.strip()]
 
+        self.media_extensions = self._parse_media_extensions(
+            os.getenv('MEDIA_EXTENSIONS', '.mkv,.mp4,.avi,.mov,.m4v,.wmv,.flv,.webm,.ts,.m2ts')
+        )
+
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
         self.log_file = os.getenv('LOG_FILE', str(self.data_dir / 'logs' / 'cleaner.log'))
 
         self._validate()
+
+    @staticmethod
+    def _parse_media_extensions(raw: str) -> Set[str]:
+        """Parse comma-separated media extensions, normalizing to lowercase with leading dot."""
+        extensions = set()
+        for ext in raw.split(','):
+            ext = ext.strip().lower()
+            if not ext:
+                continue
+            if not ext.startswith('.'):
+                ext = '.' + ext
+            extensions.add(ext)
+        if not extensions:
+            raise ValueError("MEDIA_EXTENSIONS must contain at least one extension")
+        return extensions
 
     def _get_required(self, key: str) -> str:
         """Get required environment variable or raise error."""
@@ -205,6 +224,7 @@ class Config:
             f"  fix_hardlinks={self.fix_hardlinks}\n"
             f"  enable_cache={self.enable_cache}\n"
             f"  cache_db_path={self.cache_db_path or 'default'}\n"
+            f"  media_extensions={','.join(sorted(self.media_extensions))}\n"
             f"  discord_webhook={'configured' if self.discord_webhook_url else 'not configured'}\n"
             f")"
         )

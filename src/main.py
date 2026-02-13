@@ -314,7 +314,7 @@ def main() -> int:
             config.qbt_username,
             config.qbt_password
         )
-        file_analyzer = FileAnalyzer(cache=file_cache)
+        file_analyzer = FileAnalyzer(cache=file_cache, media_extensions=config.media_extensions)
         hardlink_fixer = HardlinkFixer()
         torrent_cleaner = TorrentCleaner(config, qbt_client)
         discord_notifier = DiscordNotifier(config.discord_webhook_url)
