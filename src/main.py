@@ -14,8 +14,44 @@ from src.hardlink_fixer import HardlinkFixer
 from src.torrent_cleaner import TorrentCleaner
 from src.discord_notifier import DiscordNotifier
 from src.models import SizeIndex, WorkflowStats
-from typing import List
+from typing import Dict, List
 import qbittorrentapi
+
+
+class SpaceAccountant:
+    """Track pending unlinks per inode to accurately estimate freed disk space.
+
+    When files are hardlinked, deleting one link doesn't free space — only
+    removing the last link does. This class tracks how many links we plan to
+    remove per inode and only counts the file size when all links are gone.
+    """
+
+    def __init__(self):
+        self._pending_unlinks: Dict[int, int] = defaultdict(int)
+        self._nlinks: Dict[int, int] = {}
+        self._sizes: Dict[int, int] = {}
+
+    def estimate_freed(self, file_paths: List[str]) -> int:
+        """Estimate bytes freed by deleting the given file paths.
+
+        Tracks inodes across calls so that hardlinked files shared between
+        multiple torrents are only counted once (when the last link is removed).
+        Missing files are silently skipped.
+        """
+        freed = 0
+        for path in file_paths:
+            try:
+                stat = os.stat(path)
+            except OSError:
+                continue
+            inode = stat.st_ino
+            if inode not in self._nlinks:
+                self._nlinks[inode] = stat.st_nlink
+                self._sizes[inode] = stat.st_size
+            self._pending_unlinks[inode] += 1
+            if self._nlinks[inode] == self._pending_unlinks[inode]:
+                freed += self._sizes[inode]
+        return freed
 
 
 def is_dead_tracker_torrent(qbt_client: QBittorrentClient, torrent: qbittorrentapi.TorrentDictionary, dead_messages: List[str]) -> bool:
@@ -71,6 +107,7 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
     """
     logger = logging.getLogger(__name__)
     stats = WorkflowStats()
+    space_accountant = SpaceAccountant()
 
     logger.info("Retrieving torrents from qBittorrent...")
     torrents = qbt_client.torrents_info()
@@ -82,7 +119,13 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
         for torrent in torrents:
             if is_dead_tracker_torrent(qbt_client, torrent, config.dead_tracker_messages):
                 logger.info(f"  Dead tracker detected: {torrent.name}")
-                size = torrent.size
+                try:
+                    torrent_files = qbt_client.torrents_files(torrent.hash)
+                    dead_file_paths = [str(Path(torrent.save_path) / tf.name) for tf in torrent_files]
+                    size = space_accountant.estimate_freed(dead_file_paths)
+                except Exception as e:
+                    logger.warning(f"  Could not estimate space for {torrent.name}: {e}")
+                    size = torrent.size
                 success = torrent_cleaner.delete_torrent(
                     torrent.hash,
                     torrent.name,
@@ -256,6 +299,7 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
 
             logger.info(f"  Deleting torrent (meets criteria, no media files linked)")
 
+            freed = space_accountant.estimate_freed(file_paths)
             success = torrent_cleaner.delete_torrent(
                 torrent_hash,
                 torrent_name,
@@ -264,7 +308,7 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
 
             if success:
                 stats.torrents_deleted += 1
-                stats.space_freed_criteria_bytes += torrent.size
+                stats.space_freed_criteria_bytes += freed
                 stats.deleted_torrents.append(torrent_name)
 
                 reason_key = f"age={deletion_check.stats.age}, ratio={deletion_check.stats.ratio:.2f}"
