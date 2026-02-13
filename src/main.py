@@ -176,12 +176,13 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
 
         logger.info(f"  Deletion check: {', '.join(deletion_check.reasons)}")
 
-        if not deletion_check.should_delete:
-            logger.info(f"  Keeping torrent (criteria not met)")
+        # Skip incomplete torrents (no files to process)
+        if deletion_check.stats.seeding_time_seconds is None:
             stats.torrents_kept += 1
             stats.torrents_kept_criteria_not_met += 1
             continue
 
+        # --- Hardlink analysis and fixing (all completed torrents) ---
         try:
             torrent_files = qbt_client.torrents_files(torrent_hash)
             file_paths = [str(save_path / tf.name) for tf in torrent_files]
@@ -196,25 +197,6 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
                 f"  Hardlink analysis: {len(orphaned_files)} orphaned, "
                 f"{len(analysis.linked)} linked"
             )
-
-            # Check if files are already hardlinked to media library
-            media_files_already_linked = 0
-            if analysis.linked:
-                # Files are hardlinked - verify they're linked to media library
-                for linked_file in analysis.linked:
-                    if not file_analyzer.is_media_file(linked_file):
-                        continue
-                    # Check if this file exists in media library
-                    if file_analyzer.find_identical_file(linked_file, size_index=size_index):
-                        media_files_already_linked += 1
-
-            if media_files_already_linked > 0:
-                logger.info(
-                    f"  Keeping torrent ({media_files_already_linked} media file(s) already hardlinked)"
-                )
-                stats.torrents_kept += 1
-                stats.torrents_kept_hardlinks_fixed += 1
-                continue
 
             media_files_fixed = 0
             if config.fix_hardlinks and orphaned_files:
@@ -241,29 +223,52 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
                     logger.info(f"  Resuming torrent '{torrent_name}' after hardlink fix")
                     qbt_client.resume_torrent(torrent_hash)
 
-            if media_files_fixed > 0:
-                # Keep torrent if any media files were fixed
+            # --- Deletion decision ---
+            if not deletion_check.should_delete:
+                if media_files_fixed > 0:
+                    logger.info(f"  Keeping torrent (criteria not met, fixed {media_files_fixed} media file(s))")
+                    stats.torrents_kept_hardlinks_fixed += 1
+                else:
+                    logger.info(f"  Keeping torrent (criteria not met)")
+                    stats.torrents_kept_criteria_not_met += 1
+                stats.torrents_kept += 1
+                continue
+
+            # Check if files are already hardlinked to media library (only for deletion-eligible)
+            media_files_already_linked = 0
+            if analysis.linked:
+                # Files are hardlinked - verify they're linked to media library
+                for linked_file in analysis.linked:
+                    if not file_analyzer.is_media_file(linked_file):
+                        continue
+                    # Check if this file exists in media library
+                    if file_analyzer.find_identical_file(linked_file, size_index=size_index):
+                        media_files_already_linked += 1
+
+            if media_files_already_linked > 0 or media_files_fixed > 0:
                 logger.info(
-                    f"  Keeping torrent (fixed {media_files_fixed} media file(s))"
+                    f"  Keeping torrent ({media_files_already_linked} media file(s) already hardlinked, "
+                    f"{media_files_fixed} media file(s) fixed)"
                 )
                 stats.torrents_kept += 1
                 stats.torrents_kept_hardlinks_fixed += 1
-            else:
-                logger.info(f"  Deleting torrent (meets criteria, no media files fixed)")
+                continue
 
-                success = torrent_cleaner.delete_torrent(
-                    torrent_hash,
-                    torrent_name,
-                    delete_files=True
-                )
+            logger.info(f"  Deleting torrent (meets criteria, no media files linked)")
 
-                if success:
-                    stats.torrents_deleted += 1
-                    stats.space_freed_criteria_bytes += torrent.size
-                    stats.deleted_torrents.append(torrent_name)
+            success = torrent_cleaner.delete_torrent(
+                torrent_hash,
+                torrent_name,
+                delete_files=True
+            )
 
-                    reason_key = f"age={deletion_check.stats.age}, ratio={deletion_check.stats.ratio:.2f}"
-                    stats.deletion_reasons[reason_key] = stats.deletion_reasons.get(reason_key, 0) + 1
+            if success:
+                stats.torrents_deleted += 1
+                stats.space_freed_criteria_bytes += torrent.size
+                stats.deleted_torrents.append(torrent_name)
+
+                reason_key = f"age={deletion_check.stats.age}, ratio={deletion_check.stats.ratio:.2f}"
+                stats.deletion_reasons[reason_key] = stats.deletion_reasons.get(reason_key, 0) + 1
 
         except Exception as e:
             logger.error(f"  Error processing torrent files: {e}")
