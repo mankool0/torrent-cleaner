@@ -286,7 +286,7 @@ def main() -> int:
         config = Config()
 
         # Reconfigure logger with settings from config (log level + file)
-        logger = setup_logger('torrent-cleaner', config.log_level, config.log_file)
+        logger = setup_logger('torrent-cleaner', config.log_level, config.log_file, config.log_max_files)
         logger.info("=" * 80)
         logger.info("Torrent Cleaner Starting")
         logger.info("=" * 80)

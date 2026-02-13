@@ -54,6 +54,13 @@ class Config:
         self.log_level = os.getenv('LOG_LEVEL', 'INFO')
         self.log_file = os.getenv('LOG_FILE', str(self.data_dir / 'logs' / 'cleaner.log'))
 
+        try:
+            self.log_max_files = int(os.getenv('LOG_MAX_FILES', '5'))
+        except ValueError:
+            raise ValueError(f"LOG_MAX_FILES must be an integer, got: '{os.getenv('LOG_MAX_FILES')}'")
+        if self.log_max_files < 0:
+            raise ValueError(f"LOG_MAX_FILES must be >= 0, got: {self.log_max_files}")
+
         self._validate()
 
     @staticmethod
@@ -226,5 +233,6 @@ class Config:
             f"  cache_db_path={self.cache_db_path or 'default'}\n"
             f"  media_extensions={','.join(sorted(self.media_extensions))}\n"
             f"  discord_webhook={'configured' if self.discord_webhook_url else 'not configured'}\n"
+            f"  log_max_files={self.log_max_files}\n"
             f")"
         )

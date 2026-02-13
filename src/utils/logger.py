@@ -2,10 +2,42 @@
 
 import logging
 import sys
+from datetime import datetime, timezone
 from pathlib import Path
 
 
-def setup_logger(name: str, log_level: str = "INFO", log_file: str | None = None) -> logging.Logger:
+def _rotate_log_file(log_file: str, max_files: int) -> None:
+    """Rotate existing log file by renaming it with a timestamp suffix.
+
+    If log_file exists and is non-empty, rename it to
+    ``{stem}-{mtime_timestamp}{suffix}`` (e.g. ``cleaner-20260212-020000.log``).
+    Then enforce *max_files* by deleting the oldest rotated files.
+    When *max_files* is 0, no files are deleted.
+    """
+    path = Path(log_file)
+    if not path.exists() or path.stat().st_size == 0:
+        return
+
+    mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc)
+    timestamp = mtime.strftime("%Y%m%d-%H%M%S")
+    rotated = path.with_name(f"{path.stem}-{timestamp}{path.suffix}")
+    path.rename(rotated)
+
+    if max_files <= 0:
+        return
+
+    pattern = f"{path.stem}-*{path.suffix}"
+    rotated_files = sorted(path.parent.glob(pattern))
+    while len(rotated_files) > max_files:
+        rotated_files.pop(0).unlink()
+
+
+def setup_logger(
+    name: str,
+    log_level: str = "INFO",
+    log_file: str | None = None,
+    max_files: int = 5,
+) -> logging.Logger:
     """
     Configure and return a logger instance.
 
@@ -13,6 +45,7 @@ def setup_logger(name: str, log_level: str = "INFO", log_file: str | None = None
         name: Logger name
         log_level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
         log_file: Optional log file path
+        max_files: Max rotated log files to keep (0 = keep all)
 
     Returns:
         Configured logger instance
@@ -34,6 +67,8 @@ def setup_logger(name: str, log_level: str = "INFO", log_file: str | None = None
     if log_file:
         log_path = Path(log_file)
         log_path.parent.mkdir(parents=True, exist_ok=True)
+
+        _rotate_log_file(log_file, max_files)
 
         file_handler = logging.FileHandler(log_file)
         file_handler.setLevel(logging.DEBUG)

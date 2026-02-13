@@ -37,6 +37,7 @@ Copy `.env.example` and configure:
 | `CRON_SCHEDULE` | `0 2 * * *` | Cron schedule (default: daily 2 AM) |
 | `RUN_ON_STARTUP` | `false` | Run immediately on container start |
 | `LOG_LEVEL` | `INFO` | `DEBUG`, `INFO`, `WARNING`, `ERROR` |
+| `LOG_MAX_FILES` | `5` | Rotated log files to keep (`0` = keep all) |
 
 ### Volume Mounts
 
