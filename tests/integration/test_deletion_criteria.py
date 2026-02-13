@@ -41,7 +41,7 @@ def test_young_torrent_low_ratio_keep(qb_client, preseeded_torrent, torrent_clea
 
     result = torrent_cleaner.should_delete_torrent(torrent)
     assert result.should_delete == False, "Young torrent with low ratio should be kept"
-    assert any('Age' in reason or 'Ratio' in reason for reason in result.reasons)
+    assert any('age' in reason or 'ratio' in reason for reason in result.reasons)
 
 
 def test_young_torrent_high_ratio_keep(qb_client, preseeded_torrent, torrent_cleaner):
@@ -53,7 +53,7 @@ def test_young_torrent_high_ratio_keep(qb_client, preseeded_torrent, torrent_cle
 
     result = torrent_cleaner.should_delete_torrent(torrent)
     assert result.should_delete == False, "Young torrent should be kept regardless of ratio"
-    assert any('Age' in reason for reason in result.reasons)
+    assert any('age' in reason for reason in result.reasons)
 
 
 def test_old_torrent_low_ratio_keep(qb_client, preseeded_torrent, torrent_cleaner):
@@ -65,7 +65,7 @@ def test_old_torrent_low_ratio_keep(qb_client, preseeded_torrent, torrent_cleane
 
     result = torrent_cleaner.should_delete_torrent(torrent)
     assert result.should_delete == False, "Old torrent with low ratio should be kept"
-    assert any('Ratio' in reason for reason in result.reasons)
+    assert any('ratio' in reason for reason in result.reasons)
 
 
 def test_old_torrent_high_ratio_delete(qb_client, preseeded_torrent, torrent_cleaner):

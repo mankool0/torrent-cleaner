@@ -101,7 +101,7 @@ def test_single_file_keep_criteria_not_met(qb_client, preseeded_torrent, torrent
 
     # Should NOT delete (seeding time too low)
     assert result.should_delete == False
-    assert 'Age' in result.reasons[0]
+    assert 'age' in result.reasons[0]
 
 
 def test_multi_file_keep_main_media_fixed(qb_client, preseeded_torrent, test_dirs, torrent_cleaner):
