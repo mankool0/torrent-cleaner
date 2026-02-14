@@ -2,6 +2,7 @@
 
 import sys
 import os
+import fcntl
 from pathlib import Path
 import logging
 from collections import defaultdict
@@ -334,6 +335,24 @@ def main() -> int:
 
         # Reconfigure logger with settings from config (log level + file)
         logger = setup_logger('torrent-cleaner', config.log_level, config.log_file, config.log_max_files)
+
+        # Acquire exclusive lock to prevent concurrent runs
+        lock_path = config.data_dir / '.cleaner.lock'
+        lock_file = open(lock_path, 'w')
+        try:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            logger.warning("Another instance is already running — skipping this run")
+            if config.discord_webhook_url:
+                try:
+                    DiscordNotifier(config.discord_webhook_url).send_error(
+                        "Torrent Cleaner run skipped: another instance is already running"
+                    )
+                except Exception as e:
+                    logger.error(f"Failed to send Discord skip notification: {e}")
+            lock_file.close()
+            return 0
+
         logger.info("=" * 80)
         logger.info("Torrent Cleaner Starting")
         logger.info("=" * 80)
@@ -413,6 +432,7 @@ def main() -> int:
             file_cache.close()
 
         logger.info("Torrent Cleaner finished successfully")
+        lock_file.close()
         return 0
 
     except Exception as e:
@@ -425,6 +445,8 @@ def main() -> int:
         except Exception as discord_error:
             logger.error(f"Failed to send Discord error notification: {discord_error}")
 
+        if 'lock_file' in locals():
+            lock_file.close()
         return 1
 
 
