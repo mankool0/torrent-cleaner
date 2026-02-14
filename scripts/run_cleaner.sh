@@ -1,5 +1,9 @@
 #!/bin/bash
 
+if [ -f /app/data/torrent-cleaner/.env.cron ]; then
+    . /app/data/torrent-cleaner/.env.cron
+fi
+
 echo ""
 echo "========================================"
 echo "Torrent Cleaner - $(date)"
