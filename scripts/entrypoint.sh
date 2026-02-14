@@ -18,7 +18,7 @@ cat > /etc/cron.d/torrent-cleaner << EOF
 # Torrent Cleaner Cron Job
 SHELL=/bin/bash
 
-$CRON_SCHEDULE root /app/scripts/run_cleaner.sh > /dev/null 2>&1
+$CRON_SCHEDULE root /app/scripts/run_cleaner.sh > /proc/1/fd/1 2>&1
 EOF
 
 chmod 0644 /etc/cron.d/torrent-cleaner
