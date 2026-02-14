@@ -5,6 +5,7 @@ import os
 import fcntl
 from pathlib import Path
 import logging
+from datetime import datetime
 from collections import defaultdict
 
 from src.config import Config
@@ -14,7 +15,7 @@ from src.file_analyzer import FileAnalyzer
 from src.hardlink_fixer import HardlinkFixer
 from src.torrent_cleaner import TorrentCleaner
 from src.discord_notifier import DiscordNotifier
-from src.models import SizeIndex, WorkflowStats
+from src.models import HardlinkFailure, SizeIndex, WorkflowStats
 from typing import Dict, List
 import qbittorrentapi
 
@@ -245,6 +246,7 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
                 f"{len(analysis.linked)} linked"
             )
 
+            has_actionable_failures = False
             media_files_fixed = 0
             if config.fix_hardlinks and orphaned_files:
                 # Pause torrent to prevent redownload during hardlink fix
@@ -265,6 +267,18 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
                 stats.space_saved_hardlinks_bytes += fix_results.bytes_saved
                 media_files_fixed = fix_results.media_files_fixed
 
+                # Track actionable hardlink failures
+                for fix_result in fix_results.results:
+                    if fix_result.result.action.is_actionable_failure:
+                        has_actionable_failures = True
+                        stats.hardlink_failures.append(HardlinkFailure(
+                            torrent=torrent_name,
+                            file=fix_result.file,
+                            media_file=fix_result.media_file,
+                            action=fix_result.result.action,
+                            message=fix_result.result.message,
+                        ))
+
                 # Resume torrent after fixing
                 if not config.dry_run:
                     logger.info(f"  Resuming torrent '{torrent_name}' after hardlink fix")
@@ -279,6 +293,15 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
                     logger.info(f"  Keeping torrent (criteria not met)")
                     stats.torrents_kept_criteria_not_met += 1
                 stats.torrents_kept += 1
+                continue
+
+            # Block deletion if hardlink fixing had actionable failures
+            if has_actionable_failures:
+                logger.warning(
+                    f"  Keeping torrent (hardlink fixing failed - requires manual intervention)"
+                )
+                stats.torrents_kept += 1
+                stats.torrents_kept_hardlink_failures += 1
                 continue
 
             # Check if files are already hardlinked to media library (only for deletion-eligible)
@@ -400,6 +423,7 @@ def main() -> int:
         logger.info(f"Torrents kept: {stats.torrents_kept}")
         logger.info(f"  - Kept (criteria not met): {stats.torrents_kept_criteria_not_met}")
         logger.info(f"  - Kept (hardlinks fixed): {stats.torrents_kept_hardlinks_fixed}")
+        logger.info(f"  - Kept (hardlink failures): {stats.torrents_kept_hardlink_failures}")
         logger.info(f"Hardlinks attempted: {stats.hardlinks_attempted}")
         logger.info(f"Hardlinks fixed: {stats.hardlinks_fixed}")
         logger.info(f"Hardlinks failed: {stats.hardlinks_failed}")
@@ -427,6 +451,18 @@ def main() -> int:
         logger.info("=" * 80)
 
         discord_notifier.send_summary(stats, config.dry_run)
+
+        if stats.hardlink_failures:
+            failure_log = config.data_dir / 'logs' / 'hardlink-failures.log'
+            with open(failure_log, 'a') as f:
+                f.write(f"\n--- {datetime.now().strftime('%Y-%m-%d %H:%M:%S')} ---\n")
+                for failure in stats.hardlink_failures:
+                    f.write(f"Torrent: {failure.torrent}\n")
+                    f.write(f"  File: {failure.file}\n")
+                    f.write(f"  Media: {failure.media_file}\n")
+                    f.write(f"  Error: {failure.action.value} - {failure.message}\n")
+            logger.warning(f"Hardlink failures written to {failure_log}")
+            discord_notifier.send_hardlink_failures(stats.hardlink_failures)
 
         if file_cache:
             file_cache.close()

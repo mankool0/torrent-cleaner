@@ -6,7 +6,7 @@ from pathlib import Path
 import logging
 from typing import List
 
-from src.models import HardlinkResult, HardlinkBatchResult, HardlinkFixResult, SizeIndex
+from src.models import HardlinkAction, HardlinkResult, HardlinkBatchResult, HardlinkFixResult, SizeIndex
 
 
 class HardlinkFixer:
@@ -41,21 +41,21 @@ class HardlinkFixer:
         if not orphaned_path.exists():
             return HardlinkResult(
                 success=False,
-                action='validation_failed',
+                action=HardlinkAction.VALIDATION_FAILED,
                 message=f"Orphaned file does not exist: {orphaned_file}"
             )
 
         if not media_path.exists():
             return HardlinkResult(
                 success=False,
-                action='validation_failed',
+                action=HardlinkAction.VALIDATION_FAILED,
                 message=f"Media file does not exist: {media_file}"
             )
 
         if not orphaned_path.is_file() or not media_path.is_file():
             return HardlinkResult(
                 success=False,
-                action='validation_failed',
+                action=HardlinkAction.VALIDATION_FAILED,
                 message="Both paths must be regular files"
             )
 
@@ -66,13 +66,13 @@ class HardlinkFixer:
             if orphaned_size != media_size:
                 return HardlinkResult(
                     success=False,
-                    action='size_mismatch',
+                    action=HardlinkAction.SIZE_MISMATCH,
                     message=f"Size mismatch: orphaned={orphaned_size}, media={media_size}"
                 )
         except OSError as e:
             return HardlinkResult(
                 success=False,
-                action='stat_failed',
+                action=HardlinkAction.STAT_FAILED,
                 message=f"Failed to stat files: {e}"
             )
 
@@ -80,7 +80,7 @@ class HardlinkFixer:
             self.logger.info(f"[DRY RUN] Would fix hardlink: {orphaned_file} -> {media_file}")
             return HardlinkResult(
                 success=True,
-                action='dry_run',
+                action=HardlinkAction.DRY_RUN,
                 message=f"Would create hardlink from {media_file}"
             )
 
@@ -101,7 +101,7 @@ class HardlinkFixer:
                 self.logger.info(f"Successfully fixed hardlink: {orphaned_file} -> {media_file}")
                 return HardlinkResult(
                     success=True,
-                    action='fixed',
+                    action=HardlinkAction.FIXED,
                     message=f"Created hardlink to {media_file}"
                 )
 
@@ -114,7 +114,7 @@ class HardlinkFixer:
                     backup_path.rename(orphaned_path)
                     return HardlinkResult(
                         success=False,
-                        action='link_failed_restored',
+                        action=HardlinkAction.LINK_FAILED_RESTORED,
                         message=f"Failed to create hardlink (backup restored): {e}"
                     )
                 except OSError as restore_error:
@@ -124,7 +124,7 @@ class HardlinkFixer:
                     )
                     return HardlinkResult(
                         success=False,
-                        action='link_failed_restore_failed',
+                        action=HardlinkAction.LINK_FAILED_RESTORE_FAILED,
                         message=f"Failed to create hardlink AND restore backup: {e}, {restore_error}"
                     )
 
@@ -132,7 +132,7 @@ class HardlinkFixer:
             self.logger.error(f"Failed to backup file: {e}")
             return HardlinkResult(
                 success=False,
-                action='backup_failed',
+                action=HardlinkAction.BACKUP_FAILED,
                 message=f"Failed to backup file: {e}"
             )
 

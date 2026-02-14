@@ -7,6 +7,7 @@ from pathlib import Path
 from unittest.mock import patch
 from src.hardlink_fixer import HardlinkFixer
 from src.file_analyzer import FileAnalyzer
+from src.models import HardlinkAction
 
 
 def test_single_file_successful_fix(qb_client, torrent_creator, test_dirs):
@@ -35,7 +36,7 @@ def test_single_file_successful_fix(qb_client, torrent_creator, test_dirs):
     )
 
     assert result.success, f"Fix should succeed: {result.message}"
-    assert result.action == 'fixed'
+    assert result.action == HardlinkAction.FIXED
 
     stat_after = os.stat(torrent_data['file'])
     assert stat_after.st_nlink == 2, "File should have hardlink count of 2 after fix"
@@ -69,7 +70,7 @@ def test_fix_with_rollback(qb_client, torrent_creator, test_dirs):
         )
 
     assert not result.success, "Fix should fail"
-    assert result.action == 'link_failed_restored'
+    assert result.action == HardlinkAction.LINK_FAILED_RESTORED
     assert "Simulated hardlink failure" in result.message
 
     assert torrent_data['file'].exists(), "Original file should be restored"
@@ -105,7 +106,7 @@ def test_size_mismatch_no_hardlink(qb_client, torrent_creator, test_dirs):
     )
 
     assert not result.success, "Fix should fail due to size mismatch"
-    assert result.action == 'size_mismatch'
+    assert result.action == HardlinkAction.SIZE_MISMATCH
 
     stat_info = os.stat(torrent_data['file'])
     assert stat_info.st_nlink == 1, "File should remain orphan (size mismatch)"

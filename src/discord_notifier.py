@@ -2,10 +2,10 @@
 
 import requests
 import logging
-from typing import Dict
+from typing import Dict, List
 from datetime import datetime, timezone
 
-from src.models import WorkflowStats
+from src.models import HardlinkFailure, WorkflowStats
 
 
 class DiscordNotifier:
@@ -119,6 +119,13 @@ class DiscordNotifier:
                 },
             ])
 
+        if summary.hardlink_failures:
+            fields.append({
+                'name': 'Hardlink Failures',
+                'value': f"{len(summary.hardlink_failures)} file(s) require manual intervention",
+                'inline': True
+            })
+
         fields.extend([
             {
                 'name': 'Orphaned Files Found',
@@ -171,6 +178,59 @@ class DiscordNotifier:
         }
 
         return embed
+
+    def send_hardlink_failures(self, failures: List[HardlinkFailure]) -> bool:
+        """
+        Send hardlink failure notification to Discord.
+
+        Args:
+            failures: List of HardlinkFailure objects
+
+        Returns:
+            True if notification sent successfully
+        """
+        if not self.enabled:
+            return True
+
+        try:
+            lines = []
+            for f in failures:
+                lines.append(f"**{f.torrent}**")
+                lines.append(f"  File: `{f.file}`")
+                lines.append(f"  Media: `{f.media_file}`")
+                lines.append(f"  Error: {f.action.value} - {f.message}")
+                lines.append("")
+
+            description = '\n'.join(lines)
+            # Discord embed description limit is 4096 chars
+            if len(description) > 4000:
+                description = description[:3950] + f"\n\n... and more ({len(failures)} total failures)"
+
+            embed = {
+                'title': 'Hardlink Failures - Manual Fix Required',
+                'description': description,
+                'color': 0xFF9900,  # Orange - warning
+                'timestamp': datetime.now(timezone.utc).isoformat(),
+                'footer': {
+                    'text': 'Torrent Cleaner'
+                }
+            }
+
+            payload = {'embeds': [embed]}
+
+            response = requests.post(
+                self.webhook_url,
+                json=payload,
+                timeout=10
+            )
+            response.raise_for_status()
+
+            self.logger.info("Discord hardlink failure notification sent successfully")
+            return True
+
+        except Exception as e:
+            self.logger.error(f"Failed to send Discord hardlink failure notification: {e}")
+            return False
 
     def send_error(self, error_message: str) -> bool:
         """

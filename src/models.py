@@ -1,6 +1,7 @@
 """Data models for torrent cleaner application."""
 
 from dataclasses import dataclass, field
+from enum import Enum
 from typing import Dict, List, Optional, ValuesView
 
 
@@ -74,11 +75,34 @@ class DeletionDecision:
     stats: TorrentStats
 
 
+class HardlinkAction(Enum):
+    """Possible outcomes of a hardlink fix attempt."""
+    FIXED = 'fixed'
+    DRY_RUN = 'dry_run'
+    VALIDATION_FAILED = 'validation_failed'
+    SIZE_MISMATCH = 'size_mismatch'
+    STAT_FAILED = 'stat_failed'
+    BACKUP_FAILED = 'backup_failed'
+    LINK_FAILED_RESTORED = 'link_failed_restored'
+    LINK_FAILED_RESTORE_FAILED = 'link_failed_restore_failed'
+
+    @property
+    def is_actionable_failure(self) -> bool:
+        return self in _ACTIONABLE_FAILURES
+
+
+_ACTIONABLE_FAILURES = {
+    HardlinkAction.LINK_FAILED_RESTORED,
+    HardlinkAction.LINK_FAILED_RESTORE_FAILED,
+    HardlinkAction.BACKUP_FAILED,
+}
+
+
 @dataclass
 class HardlinkResult:
     """Result of attempting to fix a single hardlink."""
     success: bool
-    action: str
+    action: HardlinkAction
     message: str
 
 
@@ -119,6 +143,16 @@ class OrphanDetectionResult:
 
 
 @dataclass
+class HardlinkFailure:
+    """An actionable hardlink failure requiring manual intervention."""
+    torrent: str
+    file: str
+    media_file: str
+    action: HardlinkAction
+    message: str
+
+
+@dataclass
 class WorkflowStats:
     """Statistics from the torrent cleaning workflow."""
     torrents_processed: int = 0
@@ -134,8 +168,10 @@ class WorkflowStats:
     hardlinks_fixed: int = 0
     hardlinks_failed: int = 0
     orphaned_files_found: int = 0
+    torrents_kept_hardlink_failures: int = 0
     deletion_reasons: dict = None
     deleted_torrents: List[str] = None
+    hardlink_failures: List[HardlinkFailure] = None
 
     def __post_init__(self):
         """Initialize mutable default values."""
@@ -143,3 +179,5 @@ class WorkflowStats:
             self.deletion_reasons = {}
         if self.deleted_torrents is None:
             self.deleted_torrents = []
+        if self.hardlink_failures is None:
+            self.hardlink_failures = []
