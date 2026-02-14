@@ -137,6 +137,7 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
                     stats.space_freed_dead_tracker_bytes += size
                     stats.deleted_torrents.append(f"[dead tracker] {torrent.name}")
                     stats.torrents_deleted += 1
+                    stats.torrents_processed += 1
 
         if deleted_hashes:
             logger.info(f"Dead tracker pass: deleted {len(deleted_hashes)} torrent(s)")
