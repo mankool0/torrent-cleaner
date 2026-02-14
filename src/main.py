@@ -195,14 +195,16 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
             logger.info(f"  Group of {len(group)} torrents: max_seeding_time={max_seeding_time}s, sum_ratio={sum_ratio:.2f}")
 
     logger.info(f"Processing {len(torrents)} torrents...")
+    processed_count = 0
     for torrent in torrents:
         stats.torrents_processed += 1
+        processed_count += 1
 
         torrent_name = torrent.name
         torrent_hash = torrent.hash
         save_path = Path(torrent.save_path)
 
-        logger.info(f"\nProcessing torrent [{stats.torrents_processed}/{len(torrents)}]: {torrent_name}")
+        logger.info(f"\nProcessing torrent [{processed_count}/{len(torrents)}]: {torrent_name}")
 
         # Check if torrent is part of a group
         if torrent_hash in torrent_to_group:
