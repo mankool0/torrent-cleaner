@@ -3,7 +3,7 @@
 import requests
 import logging
 from typing import Dict
-from datetime import datetime
+from datetime import datetime, timezone
 
 from src.models import WorkflowStats
 
@@ -164,7 +164,7 @@ class DiscordNotifier:
             'description': description,
             'color': color,
             'fields': fields,
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': datetime.now(timezone.utc).isoformat(),
             'footer': {
                 'text': 'Torrent Cleaner'
             }
@@ -190,7 +190,7 @@ class DiscordNotifier:
                 'title': 'Torrent Cleaner Error',
                 'description': error_message,
                 'color': 0xFF0000,  # Red
-                'timestamp': datetime.now().isoformat()
+                'timestamp': datetime.now(timezone.utc).isoformat()
             }
 
             payload = {'embeds': [embed]}
