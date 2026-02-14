@@ -18,7 +18,7 @@ cat > /etc/cron.d/torrent-cleaner << EOF
 # Torrent Cleaner Cron Job
 SHELL=/bin/bash
 
-$CRON_SCHEDULE root /app/scripts/run_cleaner.sh >> /app/data/torrent-cleaner/logs/cron.log 2>&1
+$CRON_SCHEDULE root /app/scripts/run_cleaner.sh > /dev/null 2>&1
 EOF
 
 chmod 0644 /etc/cron.d/torrent-cleaner
@@ -27,7 +27,6 @@ mkdir -p /app/data/torrent-cleaner/logs /app/data/torrent-cleaner/cache
 
 # Save full environment for cron
 export -p > /app/data/torrent-cleaner/.env.cron
-touch /app/data/torrent-cleaner/logs/cron.log
 touch /app/data/torrent-cleaner/logs/cleaner.log
 
 echo "Cron job configured successfully"
@@ -40,7 +39,7 @@ if [ "${RUN_ON_STARTUP:-false}" = "true" ]; then
 fi
 
 echo "Starting cron daemon..."
-echo "Logs: /app/data/torrent-cleaner/logs/cron.log"
+echo "Logs: /app/data/torrent-cleaner/logs/cleaner.log"
 echo ""
 
 # Execute the main command (cron -f)
