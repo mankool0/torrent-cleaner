@@ -214,6 +214,47 @@ class TestConfigValidation:
         with pytest.raises(ValueError, match="QBITTORRENT_HOST"):
             Config()
 
+    def test_max_deletions_invalid_raises(self, tmp_path, monkeypatch):
+        """Test that non-numeric MAX_DELETIONS_PER_RUN raises ValueError."""
+        monkeypatch.setenv('QBITTORRENT_HOST', 'localhost')
+        monkeypatch.setenv('QBITTORRENT_USERNAME', 'admin')
+        monkeypatch.setenv('QBITTORRENT_PASSWORD', 'admin')
+        monkeypatch.setenv('TORRENT_DIR', str(tmp_path))
+        monkeypatch.setenv('MEDIA_LIBRARY_DIR', str(tmp_path))
+        monkeypatch.setenv('MAX_DELETIONS_PER_RUN', 'abc')
+
+        with pytest.raises(ValueError, match="MAX_DELETIONS_PER_RUN must be an integer"):
+            Config()
+
+    def test_max_deletions_negative_raises(self, tmp_path, monkeypatch):
+        """Test that negative MAX_DELETIONS_PER_RUN raises ValueError."""
+        monkeypatch.setenv('QBITTORRENT_HOST', 'localhost')
+        monkeypatch.setenv('QBITTORRENT_USERNAME', 'admin')
+        monkeypatch.setenv('QBITTORRENT_PASSWORD', 'admin')
+        monkeypatch.setenv('TORRENT_DIR', str(tmp_path))
+        monkeypatch.setenv('MEDIA_LIBRARY_DIR', str(tmp_path))
+        monkeypatch.setenv('MAX_DELETIONS_PER_RUN', '-1')
+
+        with pytest.raises(ValueError, match="MAX_DELETIONS_PER_RUN must be >= 0"):
+            Config()
+
+    def test_safety_defaults(self, tmp_path, monkeypatch):
+        """Test defaults for the safety-related settings."""
+        monkeypatch.setenv('QBITTORRENT_HOST', 'localhost')
+        monkeypatch.setenv('QBITTORRENT_USERNAME', 'admin')
+        monkeypatch.setenv('QBITTORRENT_PASSWORD', 'admin')
+        monkeypatch.setenv('TORRENT_DIR', str(tmp_path))
+        monkeypatch.setenv('MEDIA_LIBRARY_DIR', str(tmp_path))
+        monkeypatch.setenv('DATA_DIR', str(tmp_path / 'data'))
+        monkeypatch.delenv('MAX_DELETIONS_PER_RUN', raising=False)
+        monkeypatch.delenv('ALLOW_EMPTY_MEDIA_LIBRARY', raising=False)
+        monkeypatch.delenv('HARDLINK_BYTE_VERIFY', raising=False)
+
+        config = Config()
+        assert config.max_deletions_per_run == 10
+        assert config.allow_empty_media_library is False
+        assert config.hardlink_byte_verify is False
+
     def test_data_dir_validation(self, tmp_path, monkeypatch):
         """Test that unwritable DATA_DIR raises ValueError."""
         monkeypatch.setenv('QBITTORRENT_HOST', 'localhost')

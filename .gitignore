@@ -29,6 +29,13 @@ Thumbs.db
 
 # Docker
 docker-compose.override.yml
+docker-compose.personal.yml
+
+# Personal working files (contain torrent/tracker details)
+scripts/explore_trackers.py
+scripts/relink_missing.py
+scripts/tracker_report.txt
+scripts/tracker_torrents.txt
 
 # Test data
 test_data/

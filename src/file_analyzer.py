@@ -152,6 +152,9 @@ class FileAnalyzer:
                 file_path = os.path.join(dirpath, filename)
                 try:
                     size = os.stat(file_path).st_size
+                    # Zero-byte files all hash identically — never useful as link targets
+                    if size == 0:
+                        continue
                     size_index.add(size, file_path)
                     file_count += 1
 
@@ -195,6 +198,11 @@ class FileAnalyzer:
             file_inode = file_stat.st_ino
         except OSError as e:
             self.logger.error(f"Cannot stat file {orphaned_file}: {e}")
+            return None
+
+        # Zero-byte files all hash identically — any "match" would be meaningless
+        if file_size == 0:
+            self.logger.debug(f"Skipping zero-byte file: {orphaned_file}")
             return None
 
         candidates = effective_size_index.get_candidates(file_size)

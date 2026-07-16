@@ -33,6 +33,20 @@ class Config:
         self.dry_run = os.getenv('DRY_RUN', 'true').lower() in ('true', '1', 'yes')
         self.fix_hardlinks = os.getenv('FIX_HARDLINKS', 'true').lower() in ('true', '1', 'yes')
 
+        # Safety: cap on torrents deleted per run (0 = unlimited)
+        try:
+            self.max_deletions_per_run = int(os.getenv('MAX_DELETIONS_PER_RUN', '10'))
+        except ValueError:
+            raise ValueError(f"MAX_DELETIONS_PER_RUN must be an integer, got: '{os.getenv('MAX_DELETIONS_PER_RUN')}'")
+        if self.max_deletions_per_run < 0:
+            raise ValueError(f"MAX_DELETIONS_PER_RUN must be >= 0, got: {self.max_deletions_per_run}")
+
+        # Safety: an empty media library index aborts non-dry runs unless explicitly allowed
+        self.allow_empty_media_library = os.getenv('ALLOW_EMPTY_MEDIA_LIBRARY', 'false').lower() in ('true', '1', 'yes')
+
+        # Full byte comparison before replacing a file with a hardlink (extra I/O)
+        self.hardlink_byte_verify = os.getenv('HARDLINK_BYTE_VERIFY', 'false').lower() in ('true', '1', 'yes')
+
         # Data directory base path (used for cache and logs)
         self.data_dir = Path(os.getenv('DATA_DIR', '/app/data/torrent-cleaner'))
 
@@ -229,6 +243,8 @@ class Config:
             f"  deletion_rules={self.format_deletion_rules(self.deletion_rules)}\n"
             f"  dry_run={self.dry_run}\n"
             f"  fix_hardlinks={self.fix_hardlinks}\n"
+            f"  max_deletions_per_run={self.max_deletions_per_run or 'unlimited'}\n"
+            f"  hardlink_byte_verify={self.hardlink_byte_verify}\n"
             f"  enable_cache={self.enable_cache}\n"
             f"  cache_db_path={self.cache_db_path or 'default'}\n"
             f"  media_extensions={','.join(sorted(self.media_extensions))}\n"

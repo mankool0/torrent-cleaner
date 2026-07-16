@@ -63,7 +63,8 @@ def is_dead_tracker_torrent(qbt_client: QBittorrentClient, torrent: qbittorrenta
     Args:
         qbt_client: QBittorrentClient instance
         torrent: Torrent dictionary from qBittorrent API
-        dead_messages: List of substrings to match against tracker error messages
+        dead_messages: Messages compared for exact (case-insensitive) equality
+                       against tracker error messages
 
     Returns:
         True if all real trackers are dead
@@ -81,15 +82,21 @@ def is_dead_tracker_torrent(qbt_client: QBittorrentClient, torrent: qbittorrenta
     if not real_trackers:
         return False
 
+    dead_msgs = {dead_msg.lower() for dead_msg in dead_messages}
     for tracker in real_trackers:
         # status 4 = "Tracker has been contacted, but it is not working (or doesn't send proper replies)"
         if tracker.status != 4:
             return False
         msg = (tracker.msg or '').lower()
-        if msg not in (dead_msg.lower() for dead_msg in dead_messages):
+        if msg not in dead_msgs:
             return False
 
     return True
+
+
+def _deletion_cap_reached(config: Config, stats: WorkflowStats) -> bool:
+    """Check whether this run's deletion cap (MAX_DELETIONS_PER_RUN) has been reached."""
+    return config.max_deletions_per_run > 0 and stats.torrents_deleted >= config.max_deletions_per_run
 
 
 def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: FileAnalyzer, hardlink_fixer: HardlinkFixer, torrent_cleaner: TorrentCleaner, size_index: SizeIndex) -> WorkflowStats:
@@ -114,20 +121,61 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
     logger.info("Retrieving torrents from qBittorrent...")
     torrents = qbt_client.torrents_info()
 
+    # --- Preflight: verify torrent paths are visible from this container ---
+    # If none of qBittorrent's save paths exist here, the volume mounts or path
+    # mapping are misconfigured and every torrent would look unlinked. Deleting
+    # on that signal destroys data, so refuse to continue.
+    save_paths = {str(t.save_path) for t in torrents}
+    missing_paths = {p for p in save_paths if not Path(p).exists()}
+    for p in sorted(missing_paths)[:5]:
+        logger.warning(f"Torrent save path not visible from this container: {p}")
+    if save_paths and missing_paths == save_paths:
+        message = (
+            "None of the torrent save paths reported by qBittorrent exist in this "
+            "container - the volume mounts or path mapping are misconfigured. "
+            f"Examples: {', '.join(sorted(missing_paths)[:3])}"
+        )
+        if config.dry_run:
+            logger.warning(f"[DRY RUN] {message}")
+        else:
+            raise RuntimeError(message)
+
     # --- Dead tracker pass ---
     deleted_hashes = set()
     if config.delete_dead_trackers:
+        if not config.dead_tracker_messages:
+            logger.warning("DELETE_DEAD_TRACKERS is enabled but DEAD_TRACKER_MESSAGES is empty - no torrents will match")
         logger.info("Checking for dead tracker torrents...")
         for torrent in torrents:
             if is_dead_tracker_torrent(qbt_client, torrent, config.dead_tracker_messages):
                 logger.info(f"  Dead tracker detected: {torrent.name}")
+
+                if _deletion_cap_reached(config, stats):
+                    logger.warning(
+                        f"  Skipping deletion (MAX_DELETIONS_PER_RUN={config.max_deletions_per_run} reached): {torrent.name}"
+                    )
+                    stats.deletions_skipped_cap += 1
+                    continue
+
                 try:
                     torrent_files = qbt_client.torrents_files(torrent.hash)
                     dead_file_paths = [str(Path(torrent.save_path) / tf.name) for tf in torrent_files]
-                    size = space_accountant.estimate_freed(dead_file_paths)
                 except Exception as e:
-                    logger.warning(f"  Could not estimate space for {torrent.name}: {e}")
-                    size = torrent.size
+                    logger.warning(f"  Keeping dead tracker torrent (could not list files): {torrent.name}: {e}")
+                    continue
+
+                # Deleting removes files from disk - only proceed if we can
+                # actually see them (missing files usually mean a path/mount
+                # misconfiguration, and the main pass will keep the torrent too)
+                missing = [p for p in dead_file_paths if not os.path.exists(p)]
+                if missing:
+                    logger.warning(
+                        f"  Keeping dead tracker torrent ({len(missing)} file(s) not visible "
+                        f"from this container): {torrent.name}"
+                    )
+                    continue
+
+                size = space_accountant.estimate_freed(dead_file_paths)
                 success = torrent_cleaner.delete_torrent(
                     torrent.hash,
                     torrent.name,
@@ -246,20 +294,45 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
                 f"{len(analysis.linked)} linked"
             )
 
+            # Never act on a torrent whose files we couldn't inspect — a wrong
+            # mount/path config makes every file look missing, and deleting on
+            # that signal destroys data
+            if analysis.stats.errors > 0:
+                logger.warning(
+                    f"  Keeping torrent ({analysis.stats.errors} file(s) could not be checked - "
+                    f"possible path/mount misconfiguration)"
+                )
+                stats.torrents_kept += 1
+                stats.torrents_kept_file_errors += 1
+                continue
+
             has_actionable_failures = False
             media_files_fixed = 0
             if config.fix_hardlinks and orphaned_files:
                 # Pause torrent to prevent redownload during hardlink fix
+                paused = False
                 if not config.dry_run:
                     logger.info(f"  Pausing torrent '{torrent_name}' during hardlink fix")
                     qbt_client.pause_torrent(torrent_hash)
+                    paused = True
 
-                fix_results = hardlink_fixer.fix_orphaned_files(
-                    orphaned_files,
-                    size_index,
-                    file_analyzer,
-                    dry_run=config.dry_run
-                )
+                try:
+                    fix_results = hardlink_fixer.fix_orphaned_files(
+                        orphaned_files,
+                        size_index,
+                        file_analyzer,
+                        dry_run=config.dry_run,
+                        byte_verify=config.hardlink_byte_verify
+                    )
+                finally:
+                    # Resume even if fixing raised — a torrent left paused
+                    # forever is worse than a failed fix
+                    if paused:
+                        logger.info(f"  Resuming torrent '{torrent_name}' after hardlink fix")
+                        try:
+                            qbt_client.resume_torrent(torrent_hash)
+                        except Exception as resume_error:
+                            logger.error(f"  Failed to resume torrent '{torrent_name}': {resume_error}")
 
                 stats.hardlinks_attempted += fix_results.attempted
                 stats.hardlinks_fixed += fix_results.fixed
@@ -278,11 +351,6 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
                             action=fix_result.result.action,
                             message=fix_result.result.message,
                         ))
-
-                # Resume torrent after fixing
-                if not config.dry_run:
-                    logger.info(f"  Resuming torrent '{torrent_name}' after hardlink fix")
-                    qbt_client.resume_torrent(torrent_hash)
 
             # --- Deletion decision ---
             if not deletion_check.should_delete:
@@ -322,6 +390,14 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
                 )
                 stats.torrents_kept += 1
                 stats.torrents_kept_hardlinks_fixed += 1
+                continue
+
+            if _deletion_cap_reached(config, stats):
+                logger.warning(
+                    f"  Skipping deletion (MAX_DELETIONS_PER_RUN={config.max_deletions_per_run} reached)"
+                )
+                stats.deletions_skipped_cap += 1
+                stats.torrents_kept += 1
                 continue
 
             logger.info(f"  Deleting torrent (meets criteria, no media files linked)")
@@ -411,6 +487,19 @@ def main() -> int:
         logger.info("Building media library size index...")
         size_index = file_analyzer.build_size_index(config.media_library_dir)
 
+        # Safety: an empty index means every torrent looks unlinked and becomes
+        # eligible for deletion — almost always a wrong/unmounted MEDIA_LIBRARY_DIR
+        if size_index.file_count == 0 and not config.allow_empty_media_library:
+            message = (
+                f"Media library index is empty ({config.media_library_dir}) - every torrent "
+                f"would look unlinked and become eligible for deletion. Check the volume mount "
+                f"and MEDIA_LIBRARY_DIR, or set ALLOW_EMPTY_MEDIA_LIBRARY=true if this is intentional."
+            )
+            if config.dry_run:
+                logger.warning(f"[DRY RUN] {message}")
+            else:
+                raise RuntimeError(message)
+
         stats = run_workflow(config, qbt_client, file_analyzer, hardlink_fixer, torrent_cleaner, size_index)
 
         qbt_client.close()
@@ -424,6 +513,12 @@ def main() -> int:
         logger.info(f"  - Kept (criteria not met): {stats.torrents_kept_criteria_not_met}")
         logger.info(f"  - Kept (hardlinks fixed): {stats.torrents_kept_hardlinks_fixed}")
         logger.info(f"  - Kept (hardlink failures): {stats.torrents_kept_hardlink_failures}")
+        logger.info(f"  - Kept (file errors): {stats.torrents_kept_file_errors}")
+        if stats.deletions_skipped_cap:
+            logger.warning(
+                f"Deletions skipped (MAX_DELETIONS_PER_RUN={config.max_deletions_per_run} reached): "
+                f"{stats.deletions_skipped_cap}"
+            )
         logger.info(f"Hardlinks attempted: {stats.hardlinks_attempted}")
         logger.info(f"Hardlinks fixed: {stats.hardlinks_fixed}")
         logger.info(f"Hardlinks failed: {stats.hardlinks_failed}")

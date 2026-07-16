@@ -24,10 +24,14 @@ Copy `.env.example` and configure:
 | `QBITTORRENT_PASSWORD` | *required* | Web UI password |
 | `TORRENT_DIR` | `/data/torrents` | Torrent data path (inside container) |
 | `MEDIA_LIBRARY_DIR` | `/data/media` | Media library path (inside container) |
+| `PATH_ALIASES` | *(empty)* | Symlinks to bridge qBittorrent's paths into a single mount (see Volume Mounts) |
 | `DATA_DIR` | `/app/data/torrent-cleaner` | Cache and logs directory |
 | `DELETION_CRITERIA` | `30d 2.0` | Deletion rules (see below) |
 | `DRY_RUN` | `true` | Set `false` to actually delete |
 | `FIX_HARDLINKS` | `true` | Fix broken hardlinks before deleting |
+| `MAX_DELETIONS_PER_RUN` | `10` | Safety cap on deletions per run (`0` = unlimited) |
+| `ALLOW_EMPTY_MEDIA_LIBRARY` | `false` | Allow non-dry runs against an empty media library |
+| `HARDLINK_BYTE_VERIFY` | `false` | Full byte comparison before replacing a file with a hardlink (extra I/O) |
 | `MEDIA_EXTENSIONS` | `.mkv,.mp4,.avi,...` | Comma-separated media file extensions |
 | `ENABLE_CACHE` | `true` | Cache file hashes in SQLite |
 | `CACHE_DB_PATH` | `{DATA_DIR}/cache/file_cache.db` | Cache database path |
@@ -53,7 +57,32 @@ services:
       - cleaner-data:/app/data/torrent-cleaner # cache + logs
 ```
 
-The container paths must match what qBittorrent sees (i.e. the same mount structure), and both must be on the **same filesystem** for hardlinks to work.
+Two constraints must hold at the same time:
+
+1. **Paths must match qBittorrent's namespace.** The cleaner operates on the save paths qBittorrent reports over the API, so those paths must resolve inside this container.
+2. **Torrents and media must live under a single volume mount.** Hardlinks cannot cross separate bind mounts — the kernel returns `EXDEV` ("Invalid cross-device link") even when both mounts come from the same filesystem. Mounting `/path/to/torrents` and `/path/to/media` as two volumes breaks `FIX_HARDLINKS`.
+
+The clean way to satisfy both is a single parent mount (as above) with qBittorrent using the same layout (`/data/torrents/...`). If your qBittorrent uses a different namespace (e.g. save paths under `/downloads`) and you can't change it, use `PATH_ALIASES` to create symlinks inside the single mount:
+
+```yaml
+    volumes:
+      - /path/to/data:/data        # single mount containing torrents AND media
+    environment:
+      - PATH_ALIASES=/downloads=/data/torrents/downloads
+      - TORRENT_DIR=/downloads
+      - MEDIA_LIBRARY_DIR=/data/media
+```
+
+Format: comma-separated `link=target` pairs. qBittorrent's `/downloads/...` paths then resolve through the symlink into the single mount, so both deletion checks and hardlink fixing work.
+
+### Safety Guards
+
+A misconfigured mount or path mapping makes every torrent look unlinked — which, without protection, means mass deletion. Several guards protect against this:
+
+- **Path visibility preflight**: if none of the torrent save paths reported by qBittorrent exist inside the container, the run aborts (warns in dry run).
+- **Per-torrent file check**: a torrent whose files can't be inspected (missing/unreadable) is always kept, never deleted.
+- **Empty media library**: if the media library index contains zero files, non-dry runs abort — set `ALLOW_EMPTY_MEDIA_LIBRARY=true` only if you really have no library.
+- **Deletion cap**: at most `MAX_DELETIONS_PER_RUN` torrents are deleted per run (default 10, `0` = unlimited). Skipped deletions are reported in the summary and Discord notification and will proceed on subsequent runs.
 
 ### Deletion Criteria
 
@@ -87,6 +116,8 @@ MEDIA_EXTENSIONS=.mkv,.mp4,.avi,.mov,.m4v,.wmv,.flv,.webm,.ts,.m2ts
 ### Dead Tracker Cleanup
 
 Disabled by default. When enabled, torrents are deleted (regardless of seeding criteria) if **all** real trackers report an error message matching one of your configured messages. DHT/PeX/LSD are ignored.
+
+Note: unlike the criteria pass, dead-tracker deletion happens immediately — it skips the age/ratio rules, does not attempt hardlink fixing, and does not check whether files are linked. Files hardlinked into the media library are safe regardless (the library's copy survives), but a torrent whose content exists *only* in the torrent folder loses that content as soon as its trackers go dead — including downloads you haven't imported yet. Torrents whose files are not visible from the container are kept (see Safety Guards), and the `MAX_DELETIONS_PER_RUN` cap applies.
 
 ```
 DELETE_DEAD_TRACKERS=true

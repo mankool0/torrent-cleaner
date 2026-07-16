@@ -164,6 +164,23 @@ class TestBuildSizeIndex:
         with pytest.raises(ValueError, match="Media directory does not exist"):
             analyzer.build_size_index(Path('/nonexistent/path'))
 
+    def test_skips_zero_byte_files(self):
+        """Test that zero-byte files are not indexed (they all hash identically)."""
+        analyzer = FileAnalyzer()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            media_dir = Path(tmpdir)
+            empty = media_dir / 'empty.mkv'
+            empty.write_bytes(b'')
+            real = media_dir / 'movie.mkv'
+            real.write_bytes(b'Movie')
+
+            index = analyzer.build_size_index(media_dir)
+
+            assert 0 not in index
+            total_files = sum(len(paths) for paths in index.values())
+            assert total_files == 1
+
     def test_skips_directories(self):
         """Test that directories are skipped during indexing."""
         analyzer = FileAnalyzer()
@@ -270,6 +287,26 @@ class TestFindIdenticalFile:
             result = analyzer.find_identical_file(str(orphaned_file))
 
             assert result == str(media_file)
+
+    def test_zero_byte_file_never_matches(self):
+        """Test that a zero-byte orphan never matches, even zero-byte candidates."""
+        analyzer = FileAnalyzer()
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            tmpdir = Path(tmpdir)
+
+            orphaned_file = tmpdir / 'orphan.mkv'
+            orphaned_file.write_bytes(b'')
+
+            media_file = tmpdir / 'media.mkv'
+            media_file.write_bytes(b'')
+
+            size_index = SizeIndex()
+            size_index.add(0, str(media_file))
+
+            result = analyzer.find_identical_file(str(orphaned_file), size_index=size_index)
+
+            assert result is None
 
     def test_no_size_index_returns_none(self):
         """Test that find_identical_file returns None when no index available."""

@@ -75,8 +75,9 @@ class DiscordNotifier:
         Returns:
             Discord embed dictionary
         """
+        has_warnings = bool(summary.hardlink_failures) or summary.torrents_kept_file_errors > 0 or summary.deletions_skipped_cap > 0
         if summary.torrents_deleted == 0:
-            color = 0x00FF00  # Green
+            color = 0xFF9900 if has_warnings else 0x00FF00  # Orange if warnings, else green
         elif dry_run:
             color = 0xFFFF00  # Yellow
         else:
@@ -124,6 +125,21 @@ class DiscordNotifier:
                 'name': 'Hardlink Failures',
                 'value': f"{len(summary.hardlink_failures)} file(s) require manual intervention",
                 'inline': True
+            })
+
+        if summary.torrents_kept_file_errors > 0:
+            fields.append({
+                'name': '⚠️ Kept (Files Not Visible)',
+                'value': f"{summary.torrents_kept_file_errors} torrent(s) had files that could not be checked — "
+                         f"possible path/mount misconfiguration",
+                'inline': False
+            })
+
+        if summary.deletions_skipped_cap > 0:
+            fields.append({
+                'name': '⚠️ Deletions Skipped (Safety Cap)',
+                'value': f"{summary.deletions_skipped_cap} deletion(s) skipped after reaching MAX_DELETIONS_PER_RUN",
+                'inline': False
             })
 
         fields.extend([

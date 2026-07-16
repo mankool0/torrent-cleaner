@@ -81,6 +81,7 @@ class HardlinkAction(Enum):
     DRY_RUN = 'dry_run'
     VALIDATION_FAILED = 'validation_failed'
     SIZE_MISMATCH = 'size_mismatch'
+    CONTENT_MISMATCH = 'content_mismatch'
     STAT_FAILED = 'stat_failed'
     BACKUP_FAILED = 'backup_failed'
     LINK_FAILED_RESTORED = 'link_failed_restored'
@@ -95,6 +96,9 @@ _ACTIONABLE_FAILURES = {
     HardlinkAction.LINK_FAILED_RESTORED,
     HardlinkAction.LINK_FAILED_RESTORE_FAILED,
     HardlinkAction.BACKUP_FAILED,
+    # A content mismatch means size+hash matched but bytes differ — the orphan's
+    # content is NOT in the library, so deleting the torrent would lose data.
+    HardlinkAction.CONTENT_MISMATCH,
 }
 
 
@@ -169,6 +173,8 @@ class WorkflowStats:
     hardlinks_failed: int = 0
     orphaned_files_found: int = 0
     torrents_kept_hardlink_failures: int = 0
+    torrents_kept_file_errors: int = 0
+    deletions_skipped_cap: int = 0
     deletion_reasons: dict = None
     deleted_torrents: List[str] = None
     hardlink_failures: List[HardlinkFailure] = None

@@ -1,5 +1,7 @@
 """Hardlink repair with rollback capability."""
 
+import errno
+import filecmp
 import os
 import shutil
 from pathlib import Path
@@ -16,7 +18,8 @@ class HardlinkFixer:
         """Initialize hardlink fixer."""
         self.logger = logging.getLogger(__name__)
 
-    def fix_hardlink(self, orphaned_file: str, media_file: str, dry_run: bool = True) -> HardlinkResult:
+    def fix_hardlink(self, orphaned_file: str, media_file: str, dry_run: bool = True,
+                     byte_verify: bool = False) -> HardlinkResult:
         """
         Replace orphaned file with hardlink to media file.
 
@@ -30,6 +33,7 @@ class HardlinkFixer:
             orphaned_file: Path to orphaned file
             media_file: Path to media file to link to
             dry_run: If True, don't actually fix
+            byte_verify: If True, do a full byte comparison before linking
 
         Returns:
             HardlinkResult with success flag, action type, and message
@@ -84,6 +88,28 @@ class HardlinkFixer:
                 message=f"Would create hardlink from {media_file}"
             )
 
+        if backup_path.exists():
+            return HardlinkResult(
+                success=False,
+                action=HardlinkAction.BACKUP_FAILED,
+                message=f"Backup file already exists (leftover from an interrupted run?): {backup_path}"
+            )
+
+        if byte_verify:
+            try:
+                if not filecmp.cmp(orphaned_path, media_path, shallow=False):
+                    return HardlinkResult(
+                        success=False,
+                        action=HardlinkAction.CONTENT_MISMATCH,
+                        message=f"Byte verification failed: content differs from {media_file}"
+                    )
+            except OSError as e:
+                return HardlinkResult(
+                    success=False,
+                    action=HardlinkAction.STAT_FAILED,
+                    message=f"Byte verification could not read files: {e}"
+                )
+
         try:
             # Step 1: Rename orphaned file to .bak
             self.logger.debug(f"Backing up: {orphaned_file} -> {backup_path}")
@@ -107,7 +133,13 @@ class HardlinkFixer:
 
             except OSError as e:
                 # Step 4: Failure - restore backup
-                self.logger.error(f"Failed to create hardlink: {e}")
+                hint = ""
+                if e.errno == errno.EXDEV:
+                    hint = (
+                        " [hardlinks cannot cross separate volume mounts - put torrents "
+                        "and media under a single mount, see README 'Volume Mounts']"
+                    )
+                self.logger.error(f"Failed to create hardlink: {e}{hint}")
                 self.logger.info(f"Restoring backup: {backup_path} -> {orphaned_file}")
 
                 try:
@@ -115,7 +147,7 @@ class HardlinkFixer:
                     return HardlinkResult(
                         success=False,
                         action=HardlinkAction.LINK_FAILED_RESTORED,
-                        message=f"Failed to create hardlink (backup restored): {e}"
+                        message=f"Failed to create hardlink (backup restored): {e}{hint}"
                     )
                 except OSError as restore_error:
                     self.logger.critical(
@@ -141,7 +173,8 @@ class HardlinkFixer:
         orphaned_files: List[str],
         size_index: SizeIndex,
         file_analyzer,
-        dry_run: bool = True
+        dry_run: bool = True,
+        byte_verify: bool = False
     ) -> HardlinkBatchResult:
         """
         Fix multiple orphaned files by finding matches in media library.
@@ -151,6 +184,7 @@ class HardlinkFixer:
             size_index: Size-based media library index (size -> list of paths)
             file_analyzer: FileAnalyzer instance for finding identical files
             dry_run: If True, don't actually fix
+            byte_verify: If True, do a full byte comparison before linking
 
         Returns:
             HardlinkBatchResult with counts and detailed results for each file
@@ -184,7 +218,8 @@ class HardlinkFixer:
                 self.logger.info(f"  Found match for: {Path(orphaned_file).name}")
 
                 # Fix hardlink
-                result = self.fix_hardlink(orphaned_file, media_file, dry_run=dry_run)
+                result = self.fix_hardlink(orphaned_file, media_file, dry_run=dry_run,
+                                           byte_verify=byte_verify)
 
                 if result.success:
                     fixed += 1
