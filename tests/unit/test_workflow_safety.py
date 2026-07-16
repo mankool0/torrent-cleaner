@@ -20,12 +20,13 @@ class FakeTorrentFile:
 
 
 class FakeTorrent:
-    def __init__(self, torrent_hash, name, save_path, seeding_time, ratio):
+    def __init__(self, torrent_hash, name, save_path, seeding_time, ratio, amount_left=0):
         self.hash = torrent_hash
         self.name = name
         self.save_path = save_path
         self.seeding_time = seeding_time
         self.ratio = ratio
+        self.amount_left = amount_left
 
 
 class FakeQbtClient:
@@ -179,6 +180,21 @@ def test_deletion_cap_zero_is_unlimited(make_config, tmp_path):
 
     assert len(client.deleted) == 3
     assert stats.deletions_skipped_cap == 0
+
+
+def test_redownloading_torrent_is_kept(make_config):
+    """A torrent that completed once but is downloading again (recheck lost
+    pieces, missing files) keeps its old seeding_time — amount_left must
+    still mark it incomplete."""
+    config = make_config()
+    cleaner = TorrentCleaner(config, qbt_client=None)
+    redownloading = FakeTorrent('h1', 'redownloading', '/x',
+                                seeding_time=OLD_ENOUGH, ratio=5.0, amount_left=512)
+
+    decision = cleaner.should_delete_torrent(redownloading)
+
+    assert decision.should_delete is False
+    assert 'not completed' in decision.reasons[0].lower()
 
 
 def test_group_override_cannot_bypass_incomplete_guard(make_config):

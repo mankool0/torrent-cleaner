@@ -44,10 +44,12 @@ class TorrentCleaner:
         ratio = override_ratio if override_ratio is not None else torrent.ratio
         seeding_time = override_seeding_time if override_seeding_time is not None else torrent.seeding_time
 
-        # seeding_time will be 0 if torrent is not completed yet. Check the
-        # torrent's own seeding_time as well so a group override can't bypass
-        # this guard for an incomplete cross-seed.
-        if seeding_time == 0 or torrent.seeding_time == 0:
+        # seeding_time will be 0 if torrent is not completed yet, but a torrent
+        # that completed once and went back to downloading (recheck lost pieces,
+        # missing files) keeps its accumulated seeding_time — amount_left catches
+        # those. Check the torrent's own seeding_time as well so a group override
+        # can't bypass this guard for an incomplete cross-seed.
+        if seeding_time == 0 or torrent.seeding_time == 0 or torrent.amount_left > 0:
             return DeletionDecision(
                 should_delete=False,
                 reasons=['Torrent not completed yet'],
