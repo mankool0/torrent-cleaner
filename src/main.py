@@ -383,6 +383,12 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
                     if file_analyzer.find_identical_file(linked_file, size_index=size_index):
                         media_files_already_linked += 1
 
+                if media_files_already_linked == 0:
+                    logger.info(
+                        f"  {len(analysis.linked)} linked file(s) match nothing in the media library "
+                        f"(hardlinked elsewhere, e.g. a cross-seed)"
+                    )
+
             if media_files_already_linked > 0 or media_files_fixed > 0:
                 logger.info(
                     f"  Keeping torrent ({media_files_already_linked} media file(s) already hardlinked, "
@@ -400,7 +406,7 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
                 stats.torrents_kept += 1
                 continue
 
-            logger.info(f"  Deleting torrent (meets criteria, no media files linked)")
+            logger.info(f"  Deleting torrent (meets criteria, no media files linked to media library)")
 
             freed = space_accountant.estimate_freed(file_paths)
             success = torrent_cleaner.delete_torrent(
