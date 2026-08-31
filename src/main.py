@@ -84,8 +84,10 @@ def is_dead_tracker_torrent(qbt_client: QBittorrentClient, torrent: qbittorrenta
 
     dead_msgs = {dead_msg.lower() for dead_msg in dead_messages}
     for tracker in real_trackers:
-        # status 4 = "Tracker has been contacted, but it is not working (or doesn't send proper replies)"
-        if tracker.status != 4:
+        # status 4 = contacted but not working; qBittorrent 5.1 split off
+        # status 5 = tracker responded but rejected the announce (the message
+        # states why, e.g. "unregistered torrent")
+        if tracker.status not in (4, 5):
             return False
         msg = (tracker.msg or '').lower()
         if msg not in dead_msgs:
