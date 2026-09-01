@@ -117,7 +117,9 @@ MEDIA_EXTENSIONS=.mkv,.mp4,.avi,.mov,.m4v,.wmv,.flv,.webm,.ts,.m2ts
 
 Disabled by default. When enabled, torrents are deleted (regardless of seeding criteria) if **all** real trackers report an error message matching one of your configured messages. DHT/PeX/LSD are ignored.
 
-Note: unlike the criteria pass, dead-tracker deletion happens immediately — it skips the age/ratio rules, does not attempt hardlink fixing, and does not check whether files are linked. Files hardlinked into the media library are safe regardless (the library's copy survives), but a torrent whose content exists *only* in the torrent folder loses that content as soon as its trackers go dead — including downloads you haven't imported yet. Torrents whose files are not visible from the container are kept (see Safety Guards), and the `MAX_DELETIONS_PER_RUN` cap applies.
+Note: unlike the criteria pass, dead-tracker deletion happens immediately — it skips the age/ratio rules, does not attempt hardlink fixing, and does not check whether files are linked. Files hardlinked into the media library are safe regardless (the library's copy survives), but a torrent whose content exists *only* in the torrent folder loses that content as soon as its trackers go dead — including downloads you haven't imported yet. The `MAX_DELETIONS_PER_RUN` cap applies.
+
+Files that a *surviving* torrent still references are never deleted: a cross-seed added at the dead torrent's exact path (or a link resolving there) keeps those files on disk, and the dead torrent's entry is removed without them. Any of its files that no survivor references (an unshared sample, extras) are still removed from disk, along with directories that become empty. When the dead torrent's files are not visible from the container at all, only the entry is removed and nothing on disk is touched. If any surviving torrent's file list cannot be fetched, dead-tracker deletions are skipped for the whole run, since shared files can't be ruled out.
 
 ```
 DELETE_DEAD_TRACKERS=true

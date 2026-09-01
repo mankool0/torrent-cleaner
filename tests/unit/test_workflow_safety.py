@@ -29,13 +29,22 @@ class FakeTorrent:
         self.amount_left = amount_left
 
 
+class FakeTracker:
+    def __init__(self, url, status, msg=""):
+        self.url = url
+        self.status = status
+        self.msg = msg
+
+
 class FakeQbtClient:
     """Minimal in-memory stand-in for QBittorrentClient."""
 
-    def __init__(self, torrents, files_by_hash):
+    def __init__(self, torrents, files_by_hash, trackers_by_hash=None):
         self.torrents = list(torrents)
         self.files_by_hash = files_by_hash
+        self.trackers_by_hash = trackers_by_hash or {}
         self.deleted = []
+        self.delete_files_by_hash = {}
         self.paused = []
         self.resumed = []
 
@@ -46,9 +55,10 @@ class FakeQbtClient:
         return self.files_by_hash[torrent_hash]
 
     def torrents_trackers(self, torrent_hash):
-        return []
+        return self.trackers_by_hash.get(torrent_hash, [])
 
     def delete_torrent(self, torrent_hash, delete_files=True, dry_run=True):
+        self.delete_files_by_hash[torrent_hash] = delete_files
         if not dry_run:
             self.deleted.append(torrent_hash)
         return True
@@ -180,6 +190,181 @@ def test_deletion_cap_zero_is_unlimited(make_config, tmp_path):
 
     assert len(client.deleted) == 3
     assert stats.deletions_skipped_cap == 0
+
+
+DEAD_TRACKERS = [FakeTracker("https://t/announce", 5, "unregistered torrent")]
+WORKING_TRACKERS = [FakeTracker("https://t/announce", 2)]
+DEAD_ENV = {'DELETE_DEAD_TRACKERS': 'true', 'DEAD_TRACKER_MESSAGES': 'unregistered torrent'}
+
+
+def test_dead_torrent_shared_files_are_kept(make_config, tmp_path):
+    """A dead torrent sharing its file path with a surviving torrent (same-path
+    cross-seed) must lose its entry but keep its files."""
+    config = make_config(**DEAD_ENV)
+    save_dir = tmp_path / 'torrents'
+    save_dir.mkdir()
+    shared_file = save_dir / 'movie.mkv'
+    shared_file.write_bytes(b'X' * 1024)
+
+    dead = FakeTorrent('hdead', 'dead-twin', str(save_dir), seeding_time=1000, ratio=0.1)
+    survivor = FakeTorrent('halive', 'live-twin', str(save_dir), seeding_time=1000, ratio=0.1)
+    client = FakeQbtClient(
+        [dead, survivor],
+        {'hdead': [FakeTorrentFile('movie.mkv')], 'halive': [FakeTorrentFile('movie.mkv')]},
+        trackers_by_hash={'hdead': DEAD_TRACKERS, 'halive': WORKING_TRACKERS},
+    )
+
+    stats = run(config, client)
+
+    assert client.deleted == ['hdead']
+    assert client.delete_files_by_hash['hdead'] is False, "Shared files must not be deleted"
+    assert shared_file.exists()
+    assert stats.torrents_deleted_dead_tracker == 1
+    assert stats.space_freed_dead_tracker_bytes == 0
+
+
+def _make_partial_overlap(tmp_path):
+    """Dead pack (movie + sample) where a survivor shares only the movie."""
+    save_dir = tmp_path / 'torrents'
+    pack = save_dir / 'Pack'
+    sample_dir = pack / 'Sample'
+    sample_dir.mkdir(parents=True)
+    movie = pack / 'movie.mkv'
+    movie.write_bytes(b'X' * 1024)
+    sample = sample_dir / 'sample.mkv'
+    sample.write_bytes(b'S' * 512)
+
+    dead = FakeTorrent('hdead', 'dead-pack', str(save_dir), seeding_time=1000, ratio=0.1)
+    survivor = FakeTorrent('halive', 'live-single', str(save_dir), seeding_time=1000, ratio=0.1)
+    client = FakeQbtClient(
+        [dead, survivor],
+        {
+            'hdead': [FakeTorrentFile('Pack/movie.mkv'), FakeTorrentFile('Pack/Sample/sample.mkv')],
+            'halive': [FakeTorrentFile('Pack/movie.mkv')],
+        },
+        trackers_by_hash={'hdead': DEAD_TRACKERS, 'halive': WORKING_TRACKERS},
+    )
+    return client, movie, sample, sample_dir, pack
+
+
+def test_dead_torrent_partial_overlap_removes_unshared_files(make_config, tmp_path):
+    """When only some files are shared, the entry goes, shared files stay, and
+    unshared leftovers (e.g. a sample) are unlinked with empty dirs pruned."""
+    config = make_config(**DEAD_ENV)
+    client, movie, sample, sample_dir, pack = _make_partial_overlap(tmp_path)
+
+    stats = run(config, client)
+
+    assert client.deleted == ['hdead']
+    assert client.delete_files_by_hash['hdead'] is False
+    assert movie.exists(), "Shared file must survive"
+    assert not sample.exists(), "Unshared file must be removed"
+    assert not sample_dir.exists(), "Emptied directory must be pruned"
+    assert pack.exists(), "Directory holding shared content must survive"
+    assert stats.space_freed_dead_tracker_bytes == 512
+
+
+def test_dead_torrent_partial_overlap_dry_run_keeps_disk_untouched(make_config, tmp_path):
+    """Dry run reports the unshared removals without touching disk."""
+    config = make_config(**DEAD_ENV)
+    config.dry_run = True
+    client, movie, sample, sample_dir, pack = _make_partial_overlap(tmp_path)
+
+    stats = run(config, client)
+
+    assert client.delete_files_by_hash['hdead'] is False
+    assert movie.exists() and sample.exists() and sample_dir.exists()
+    assert stats.space_freed_dead_tracker_bytes == 512  # still estimated
+
+
+def test_dead_torrent_unshared_files_are_deleted(make_config, tmp_path):
+    """A dead torrent whose files nothing else references is deleted with files."""
+    config = make_config(**DEAD_ENV)
+    save_dir = tmp_path / 'torrents'
+    save_dir.mkdir()
+    (save_dir / 'dead.mkv').write_bytes(b'X' * 1024)
+    (save_dir / 'other.mkv').write_bytes(b'Y' * 2048)
+
+    dead = FakeTorrent('hdead', 'dead-only', str(save_dir), seeding_time=1000, ratio=0.1)
+    survivor = FakeTorrent('halive', 'unrelated', str(save_dir), seeding_time=1000, ratio=0.1)
+    client = FakeQbtClient(
+        [dead, survivor],
+        {'hdead': [FakeTorrentFile('dead.mkv')], 'halive': [FakeTorrentFile('other.mkv')]},
+        trackers_by_hash={'hdead': DEAD_TRACKERS, 'halive': WORKING_TRACKERS},
+    )
+
+    stats = run(config, client)
+
+    assert client.deleted == ['hdead']
+    assert client.delete_files_by_hash['hdead'] is True
+    assert stats.space_freed_dead_tracker_bytes == 1024
+
+
+def test_dead_cross_seed_pair_still_frees_files(make_config, tmp_path):
+    """Two dead torrents sharing a path (both cross-seed twins dead) don't
+    count as survivors for each other — files are freed."""
+    config = make_config(**DEAD_ENV)
+    save_dir = tmp_path / 'torrents'
+    save_dir.mkdir()
+    (save_dir / 'movie.mkv').write_bytes(b'X' * 1024)
+
+    dead_a = FakeTorrent('ha', 'twin-a', str(save_dir), seeding_time=1000, ratio=0.1)
+    dead_b = FakeTorrent('hb', 'twin-b', str(save_dir), seeding_time=1000, ratio=0.1)
+    client = FakeQbtClient(
+        [dead_a, dead_b],
+        {'ha': [FakeTorrentFile('movie.mkv')], 'hb': [FakeTorrentFile('movie.mkv')]},
+        trackers_by_hash={'ha': DEAD_TRACKERS, 'hb': DEAD_TRACKERS},
+    )
+
+    stats = run(config, client)
+
+    assert sorted(client.deleted) == ['ha', 'hb']
+    assert client.delete_files_by_hash['ha'] is True
+    assert stats.torrents_deleted_dead_tracker == 2
+
+
+def test_dead_torrent_missing_files_entry_removed(make_config, tmp_path):
+    """A dead torrent whose files aren't visible loses its entry but no files
+    (entry removal is always data-safe; the old behavior kept it forever)."""
+    config = make_config(**DEAD_ENV)
+    save_dir = tmp_path / 'torrents'
+    save_dir.mkdir()
+
+    dead = FakeTorrent('hdead', 'dead-missing', str(save_dir), seeding_time=1000, ratio=0.1)
+    client = FakeQbtClient(
+        [dead],
+        {'hdead': [FakeTorrentFile('gone.mkv')]},
+        trackers_by_hash={'hdead': DEAD_TRACKERS},
+    )
+
+    stats = run(config, client)
+
+    assert client.deleted == ['hdead']
+    assert client.delete_files_by_hash['hdead'] is False
+    assert stats.torrents_deleted_dead_tracker == 1
+    assert stats.space_freed_dead_tracker_bytes == 0
+
+
+def test_unlistable_survivor_blocks_dead_deletions(make_config, tmp_path):
+    """If any surviving torrent's file list can't be fetched, shared files can't
+    be ruled out — no dead-tracker deletion may happen this run."""
+    config = make_config(**DEAD_ENV)
+    save_dir = tmp_path / 'torrents'
+    save_dir.mkdir()
+    (save_dir / 'movie.mkv').write_bytes(b'X' * 1024)
+
+    dead = FakeTorrent('hdead', 'dead', str(save_dir), seeding_time=1000, ratio=0.1)
+    survivor = FakeTorrent('halive', 'unlistable', str(save_dir), seeding_time=1000, ratio=0.1)
+    client = FakeQbtClient(
+        [dead, survivor],
+        {'hdead': [FakeTorrentFile('movie.mkv')]},  # no entry for halive -> KeyError
+        trackers_by_hash={'hdead': DEAD_TRACKERS, 'halive': WORKING_TRACKERS},
+    )
+
+    stats = run(config, client)
+
+    assert client.deleted == []
+    assert stats.torrents_deleted_dead_tracker == 0
 
 
 def test_redownloading_torrent_is_kept(make_config):

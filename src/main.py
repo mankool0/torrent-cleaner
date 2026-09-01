@@ -96,6 +96,38 @@ def is_dead_tracker_torrent(qbt_client: QBittorrentClient, torrent: qbittorrenta
     return True
 
 
+def _remove_unshared_files(paths: List[str], save_path: Path, dry_run: bool) -> None:
+    """Unlink a deleted dead torrent's files that no surviving torrent references.
+
+    Used when shared files forced an entry-only deletion: qBittorrent's delete
+    is all-or-nothing, so the unshared leftovers (e.g. a sample file) are
+    removed here instead. Directories emptied by this are pruned, but never
+    the save path itself (other torrents live there).
+    """
+    logger = logging.getLogger(__name__)
+    save_path_resolved = Path(os.path.realpath(save_path))
+    for path in paths:
+        if dry_run:
+            logger.info(f"  [DRY RUN] Would remove unshared file: {path}")
+            continue
+        try:
+            os.unlink(path)
+            logger.info(f"  Removed unshared file: {path}")
+        except OSError as e:
+            logger.error(f"  Failed to remove unshared file {path}: {e}")
+            continue
+        parent = Path(path).parent
+        try:
+            while True:
+                parent_resolved = Path(os.path.realpath(parent))
+                if parent_resolved == save_path_resolved or save_path_resolved not in parent_resolved.parents:
+                    break
+                os.rmdir(parent)  # only removes empty directories
+                parent = parent.parent
+        except OSError:
+            pass  # directory not empty - stop pruning
+
+
 def _deletion_cap_reached(config: Config, stats: WorkflowStats) -> bool:
     """Check whether this run's deletion cap (MAX_DELETIONS_PER_RUN) has been reached."""
     return config.max_deletions_per_run > 0 and stats.torrents_deleted >= config.max_deletions_per_run
@@ -148,48 +180,105 @@ def run_workflow(config: Config, qbt_client: QBittorrentClient, file_analyzer: F
         if not config.dead_tracker_messages:
             logger.warning("DELETE_DEAD_TRACKERS is enabled but DEAD_TRACKER_MESSAGES is empty - no torrents will match")
         logger.info("Checking for dead tracker torrents...")
-        for torrent in torrents:
-            if is_dead_tracker_torrent(qbt_client, torrent, config.dead_tracker_messages):
-                logger.info(f"  Dead tracker detected: {torrent.name}")
+        dead_torrents = [
+            t for t in torrents
+            if is_dead_tracker_torrent(qbt_client, t, config.dead_tracker_messages)
+        ]
 
-                if _deletion_cap_reached(config, stats):
-                    logger.warning(
-                        f"  Skipping deletion (MAX_DELETIONS_PER_RUN={config.max_deletions_per_run} reached): {torrent.name}"
-                    )
-                    stats.deletions_skipped_cap += 1
+        # Cross-seeds can share a dead torrent's files: another torrent added at
+        # the same path, or a link that resolves there. Deleting the files would
+        # break those survivors, so collect every path the kept torrents resolve
+        # to and never delete a file that is still referenced.
+        surviving_paths = set()
+        survivors_unlisted = 0
+        if dead_torrents:
+            dead_hash_set = {t.hash for t in dead_torrents}
+            for torrent in torrents:
+                if torrent.hash in dead_hash_set:
                     continue
-
                 try:
-                    torrent_files = qbt_client.torrents_files(torrent.hash)
-                    dead_file_paths = [str(Path(torrent.save_path) / tf.name) for tf in torrent_files]
+                    for tf in qbt_client.torrents_files(torrent.hash):
+                        surviving_paths.add(os.path.realpath(str(Path(torrent.save_path) / tf.name)))
                 except Exception as e:
-                    logger.warning(f"  Keeping dead tracker torrent (could not list files): {torrent.name}: {e}")
-                    continue
+                    survivors_unlisted += 1
+                    logger.warning(f"  Could not list files for surviving torrent {torrent.name}: {e}")
 
-                # Deleting removes files from disk - only proceed if we can
-                # actually see them (missing files usually mean a path/mount
-                # misconfiguration, and the main pass will keep the torrent too)
-                missing = [p for p in dead_file_paths if not os.path.exists(p)]
-                if missing:
-                    logger.warning(
-                        f"  Keeping dead tracker torrent ({len(missing)} file(s) not visible "
-                        f"from this container): {torrent.name}"
-                    )
-                    continue
+        if survivors_unlisted:
+            # Without the full survivor file list no file deletion can be
+            # proven safe - keep everything and let the next run retry
+            logger.warning(
+                f"Skipping dead tracker deletions: file lists unavailable for {survivors_unlisted} "
+                f"surviving torrent(s), so shared files cannot be ruled out"
+            )
+            dead_torrents = []
 
-                size = space_accountant.estimate_freed(dead_file_paths)
-                success = torrent_cleaner.delete_torrent(
-                    torrent.hash,
-                    torrent.name,
-                    delete_files=True
+        for torrent in dead_torrents:
+            logger.info(f"  Dead tracker detected: {torrent.name}")
+
+            if _deletion_cap_reached(config, stats):
+                logger.warning(
+                    f"  Skipping deletion (MAX_DELETIONS_PER_RUN={config.max_deletions_per_run} reached): {torrent.name}"
                 )
-                if success:
-                    deleted_hashes.add(torrent.hash)
-                    stats.torrents_deleted_dead_tracker += 1
-                    stats.space_freed_dead_tracker_bytes += size
-                    stats.deleted_torrents.append(f"[dead tracker] {torrent.name}")
-                    stats.torrents_deleted += 1
-                    stats.torrents_processed += 1
+                stats.deletions_skipped_cap += 1
+                continue
+
+            try:
+                torrent_files = qbt_client.torrents_files(torrent.hash)
+                dead_file_paths = [str(Path(torrent.save_path) / tf.name) for tf in torrent_files]
+            except Exception as e:
+                logger.warning(f"  Keeping dead tracker torrent (could not list files): {torrent.name}: {e}")
+                continue
+
+            # Removing the torrent ENTRY is always data-safe; removing its
+            # FILES is not. Keep every file when they are invisible from here
+            # (usually a path/mount misconfiguration). When only some files
+            # are shared with surviving torrents (cross-seed at the same path),
+            # qBt's all-or-nothing delete can't split them: remove the entry
+            # without files, then unlink the unshared leftovers directly.
+            missing = [p for p in dead_file_paths if not os.path.exists(p)]
+            shared = [p for p in dead_file_paths if os.path.realpath(p) in surviving_paths]
+            delete_files = not missing and not shared
+            unshared = []
+            if missing:
+                logger.warning(
+                    f"  {len(missing)} file(s) not visible from this container - "
+                    f"deleting torrent but keeping files: {torrent.name}"
+                )
+            elif shared:
+                unshared = [p for p in dead_file_paths if os.path.realpath(p) not in surviving_paths]
+                logger.info(
+                    f"  {len(shared)} file(s) shared with surviving torrents (cross-seed) - "
+                    f"deleting torrent, keeping shared files"
+                    + (f", removing {len(unshared)} unshared file(s)" if unshared else "")
+                    + f": {torrent.name}"
+                )
+
+            if delete_files:
+                size = space_accountant.estimate_freed(dead_file_paths)
+            elif unshared:
+                size = space_accountant.estimate_freed(unshared)
+            else:
+                size = 0
+            success = torrent_cleaner.delete_torrent(
+                torrent.hash,
+                torrent.name,
+                delete_files=delete_files
+            )
+            if success:
+                if unshared:
+                    _remove_unshared_files(unshared, Path(torrent.save_path), config.dry_run)
+                deleted_hashes.add(torrent.hash)
+                stats.torrents_deleted_dead_tracker += 1
+                stats.space_freed_dead_tracker_bytes += size
+                if delete_files:
+                    label = "[dead tracker]"
+                elif missing:
+                    label = "[dead tracker, files kept]"
+                else:
+                    label = "[dead tracker, shared files kept]"
+                stats.deleted_torrents.append(f"{label} {torrent.name}")
+                stats.torrents_deleted += 1
+                stats.torrents_processed += 1
 
         if deleted_hashes:
             logger.info(f"Dead tracker pass: deleted {len(deleted_hashes)} torrent(s)")
